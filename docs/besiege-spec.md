@@ -1,6 +1,6 @@
-# Levy — Requirements & Architecture Spec
+# Besiege — Requirements & Architecture Spec
 
-A daemon-backed console for running coding agents across multi-repo initiatives — config injection, initiative memory, and a PR tracking system that replaces GitHub's UI at fleet scale.
+A daemon-backed console for running coding agents across multi-repo campaigns — config injection, campaign memory, and a PR tracking system that replaces GitHub's UI at fleet scale.
 
 - **Status:** Draft, from design conversation
 - **Owner:** Michal Krukowski
@@ -23,13 +23,13 @@ A daemon-backed console for running coding agents across multi-repo initiatives 
 
 ## 1. Problem & goals
 
-Org-wide rollouts (e.g. asdf → tool-versions) run as a multi-step PR flow — groundwork, migration, post-factum fixes, cleanup — across on the order of 300 repos. A single initiative can produce ~1,200 PRs. GitHub's PR list and Projects views are one-dimensional and choke at this scale; there is no view shaped like the actual work, which is a matrix of *repo × step*, not a list.
+Org-wide rollouts (e.g. asdf → tool-versions) run as a multi-step PR flow — groundwork, migration, post-factum fixes, cleanup — across on the order of 300 repos. A single campaign can produce ~1,200 PRs. GitHub's PR list and Projects views are one-dimensional and choke at this scale; there is no view shaped like the actual work, which is a matrix of *repo × step*, not a list.
 
 Separately, running many concurrent Claude Code sessions in terminals means: config/preferences live only in ad-hoc CLAUDE.md edits, nothing carries forward what a prior session already learned about a recurring failure, and knowing which of N terminals just asked a question means tab-hopping.
 
 Goals:
 
-- Centralize initiative state (PR status, review status, recurring failures) so agents and the operator both read from one place, refreshed on a schedule rather than queried live.
+- Centralize campaign state (PR status, review status, recurring failures) so agents and the operator both read from one place, refreshed on a schedule rather than queried live.
 - Inject per-session config (always-on and path-scoped) without editing shared repo files.
 - Carry forward what's been learned — both "how to do step X" and "how we fixed failure Y" — into subsequent sessions.
 - Surface, in one place, every agent that's blocked on input or actively claimed on a PR, instead of N terminal tabs.
@@ -37,17 +37,17 @@ Goals:
 
 ## 2. Non-goals
 
-- Replacing GitHub as the system of record for code, reviews, or merges — Levy caches and displays GitHub state, it doesn't own it.
+- Replacing GitHub as the system of record for code, reviews, or merges — Besiege caches and displays GitHub state, it doesn't own it.
 - Fully autonomous dispatch. The operator initiates batches; claims are advisory rather than a hard scheduler lock (revisit if dispatch becomes automated).
 - Blocking agents from using `gh` / the GitHub API outright — the internal representation is the preferred fast path for state, not the only permitted one.
 
 ## 3. Architecture
 
-A local daemon is the single source of truth. The GUI and TUI are both thin clients over its API; the `claude` wrapper and Claude Code's own hooks are the integration seam into each session, rather than either front-end embedding orchestration logic directly.
+A local daemon is the single source of truth. The GUI and TUI are both thin clients over its API; the `besiege` CLI wrapper and Claude Code's own hooks are the integration seam into each session, rather than either front-end embedding orchestration logic directly.
 
 ```
- GUI (Ubuntu)      TUI              claude wrapper
- Electron/Tauri     SSH-friendly      alias around claude exec
+ GUI (Ubuntu)      TUI              besiege CLI
+ Electron/Tauri     SSH-friendly      wraps claude exec
         \                |                  /
          \_______________|_________________/
                           |
@@ -89,14 +89,14 @@ Two independently keyed stores, not one table — they differ in when they fire 
 
 | Key | Trigger | Authored |
 |---|---|---|
-| `initiative × task-definition` | Every dispatch for that step, regardless of outcome | Up front, per pipeline step — a playbook entry |
-| `initiative × failure-signature` | Only on retry-after-failure | Accumulates organically as agents hit new breakage |
+| `campaign × task-definition` | Every dispatch for that step, regardless of outcome | Up front, per pipeline step — a playbook entry |
+| `campaign × failure-signature` | Only on retry-after-failure | Accumulates organically as agents hit new breakage |
 
 A failure signature is deliberately not tied to a step — the same signature (e.g. a lint rule) can recur across the groundwork step in one repo and the cleanup step in another, and should resolve to the same documented fix either way.
 
 ## 6. PR tracking
 
-The core of Levy. The unit of work isn't a PR list, it's a matrix: `initiative → ordered steps → repos → PR`. At 300 repos × 4 steps, that's the view GitHub has no equivalent of.
+The core of Besiege. The unit of work isn't a PR list, it's a matrix: `campaign → ordered steps → repos → PR`. At 300 repos × 4 steps, that's the view GitHub has no equivalent of.
 
 ### PR record
 
@@ -114,7 +114,7 @@ Task-definitions carry a `since` timestamp. A task added mid-rollout — e.g. "u
 
 Whenever an agent is dispatched to a PR for *any* reason, the daemon bundles the primary task plus all outstanding `pending_tasks` into the injected context: fixing a failing lint check becomes "fix the lint check; also apply the pending README update" — one CI run pays for both. Piggybacked work should land as its own commit within the PR, not folded into the primary diff, so it stays inspectable.
 
-> **Completeness gap:** opportunistic batching only fires when a PR gets touched again for some other reason. A PR that's already merged and green will carry `pending_tasks` forever with nothing to trigger it. This needs a scheduled *initiative closeout* sweep — one pass over every repo with outstanding pending tasks, batched into a single new PR per repo — as the completeness backstop. Batching is the efficiency layer; the sweep is what guarantees the work actually finishes.
+> **Completeness gap:** opportunistic batching only fires when a PR gets touched again for some other reason. A PR that's already merged and green will carry `pending_tasks` forever with nothing to trigger it. This needs a scheduled *campaign closeout* sweep — one pass over every repo with outstanding pending tasks, batched into a single new PR per repo — as the completeness backstop. Batching is the efficiency layer; the sweep is what guarantees the work actually finishes.
 
 Completion isn't inferred from a diff — the agent reports back, in structured output at session end, exactly which `pending_tasks` ids it closed, and the daemon flips their state from that report.
 
@@ -144,7 +144,7 @@ Claude Code's `Notification` hook fires when a session is idle and waiting on in
 
 ## 9. Agent-facing interface
 
-The internal representation is exposed to agents as an MCP tool — `pr_state(repo, initiative)`, `pending_tasks(repo)`, `failure_pattern(signature)` — paired with an always-on injected instruction to prefer it over raw `gh` / GitHub API calls for state reads, purely for rate-limit conservation at fleet scale.
+The internal representation is exposed to agents as an MCP tool — `pr_state(repo, campaign)`, `pending_tasks(repo)`, `failure_pattern(signature)` — paired with an always-on injected instruction to prefer it over raw `gh` / GitHub API calls for state reads, purely for rate-limit conservation at fleet scale.
 
 This is a preference, not a restriction: agents still use `gh`/git directly for anything the cache doesn't hold — full diff content, PR descriptions, and all actual writes (pushing commits, opening PRs). The internal representation is the fast path for state, not a replacement for GitHub as the write target.
 
@@ -152,7 +152,7 @@ This is a preference, not a restriction: agents still use `gh`/git directly for 
 
 Both front-ends are clients of the same daemon API — no orchestration logic lives in either. GUI trades for interaction flexibility; TUI trades for running anywhere (SSH, low resource) with full functional parity, not a reduced feature set.
 
-- **Primary dashboard:** the initiative × step × repo grid — the view GitHub can't render, not a flat list.
+- **Primary dashboard:** the campaign × step × repo grid — the view GitHub can't render, not a flat list.
 - **Default filter — "needs me":** unaddressed review feedback, CI red with no matching failure signature (genuinely novel), or approved-and-mergeable. Passing / awaiting-review / matched-to-a-known-pattern-and-retried stays hidden by default.
 - **Live status board:** active claims and open questions in one place, replacing tab-hopping across terminals.
 
@@ -166,5 +166,5 @@ Both front-ends are clients of the same daemon API — no orchestration logic li
 
 - **Claim enforcement** — stays advisory while dispatch is human-initiated. Revisit if/when dispatch becomes automated and double-work risk rises.
 - **GUI/TUI update model** — push updates from the daemon vs. poll-on-open/on-interval from each client — not yet decided.
-- **Task-definition lifecycle** — how a task-definition itself gets authored and retired mid-initiative hasn't been specified — only that it carries a `since` marker.
-- **Closed-initiative retention** — no pruning/archival policy yet for initiatives that have finished their closeout sweep.
+- **Task-definition lifecycle** — how a task-definition itself gets authored and retired mid-campaign hasn't been specified — only that it carries a `since` marker.
+- **Closed-campaign retention** — no pruning/archival policy yet for campaigns that have finished their closeout sweep.
