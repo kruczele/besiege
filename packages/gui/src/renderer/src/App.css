@@ -1,0 +1,37 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #14161c;
+  color: #e7e8ed;
+}
+
+.shell {
+  padding: 2rem;
+  max-width: 40rem;
+}
+
+h1 {
+  font-size: 1.3rem;
+  margin: 0 0 1rem;
+}
+
+.status {
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.status-pending {
+  color: #9ba1b0;
+}
+
+.status-down {
+  color: #e5645a;
+}
+
+.status-up {
+  color: #35b37e;
+}
