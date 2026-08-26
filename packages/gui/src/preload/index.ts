@@ -1,12 +1,21 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DaemonHealth } from "../main/daemon-client.js";
+import type { ConfigRule, DaemonHealth, DaemonResult, Notification } from "../shared/types.js";
 
-export type DaemonHealthResult =
-  | { ok: true; health: DaemonHealth }
-  | { ok: false; error: string };
+export type { DaemonResult };
 
 const api = {
-  getDaemonHealth: (): Promise<DaemonHealthResult> => ipcRenderer.invoke("daemon:health"),
+  getDaemonHealth: (): Promise<DaemonResult<DaemonHealth>> => ipcRenderer.invoke("daemon:health"),
+
+  listConfigRules: (): Promise<DaemonResult<ConfigRule[]>> => ipcRenderer.invoke("config:list"),
+  createConfigRule: (pattern: string, context: string): Promise<DaemonResult<ConfigRule>> =>
+    ipcRenderer.invoke("config:create", pattern, context),
+  deleteConfigRule: (id: number): Promise<DaemonResult<void>> =>
+    ipcRenderer.invoke("config:delete", id),
+
+  listNotifications: (unacknowledgedOnly: boolean): Promise<DaemonResult<Notification[]>> =>
+    ipcRenderer.invoke("notifications:list", unacknowledgedOnly),
+  acknowledgeNotification: (id: number): Promise<DaemonResult<Notification>> =>
+    ipcRenderer.invoke("notifications:ack", id),
 };
 
 contextBridge.exposeInMainWorld("api", api);

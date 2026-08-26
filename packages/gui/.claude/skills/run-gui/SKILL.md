@@ -55,6 +55,7 @@ Screenshots land in `/tmp/shots/` (override: `SCREENSHOT_DIR`).
 | `launch` | launch the app, wait for the window |
 | `ss [name]` | screenshot -> `/tmp/shots/<name>.png` |
 | `text [css-sel]` | print innerText (omit selector for whole body) |
+| `click-text <text>` | click a button/link containing this text |
 | `wait <css-sel>` | wait for element, 10s timeout |
 | `windows` | list all windows (single-window app today) |
 | `quit` | close app, exit |

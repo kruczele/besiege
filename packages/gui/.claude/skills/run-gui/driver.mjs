@@ -37,6 +37,18 @@ const COMMANDS = {
     console.log("screenshot:", f);
   },
 
+  async "click-text"(text) {
+    if (!page) return console.log("ERROR: launch first");
+    const r = await page.evaluate((t) => {
+      const els = [...document.querySelectorAll("button, a, [role=\"button\"]")];
+      const el = els.find((e) => e.textContent?.trim() === t) ?? els.find((e) => e.textContent?.includes(t));
+      if (!el) return "NOT_FOUND";
+      el.click();
+      return "OK: " + el.tagName;
+    }, text);
+    console.log("click-text", JSON.stringify(text), "->", r);
+  },
+
   async text(sel) {
     if (!page) return console.log("ERROR: launch first");
     console.log(

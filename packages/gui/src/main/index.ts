@@ -1,6 +1,13 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
-import { fetchDaemonHealth } from "./daemon-client.js";
+import {
+  acknowledgeNotification,
+  createConfigRule,
+  deleteConfigRule,
+  fetchConfigRules,
+  fetchDaemonHealth,
+  fetchNotifications,
+} from "./daemon-client.js";
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -21,13 +28,26 @@ function createWindow(): void {
   }
 }
 
-ipcMain.handle("daemon:health", async () => {
-  try {
-    return { ok: true as const, health: await fetchDaemonHealth() };
-  } catch (err) {
-    return { ok: false as const, error: (err as Error).message };
-  }
-});
+// Wraps a daemon call so IPC never rejects — the renderer always gets
+// { ok, ... } and decides how to render a down/unreachable daemon.
+function daemonHandle<T>(channel: string, fn: (...args: any[]) => Promise<T>) {
+  ipcMain.handle(channel, async (_event, ...args) => {
+    try {
+      return { ok: true as const, result: await fn(...args) };
+    } catch (err) {
+      return { ok: false as const, error: (err as Error).message };
+    }
+  });
+}
+
+daemonHandle("daemon:health", fetchDaemonHealth);
+daemonHandle("config:list", fetchConfigRules);
+daemonHandle("config:create", (pattern: string, context: string) => createConfigRule(pattern, context));
+daemonHandle("config:delete", (id: number) => deleteConfigRule(id));
+daemonHandle("notifications:list", (unacknowledgedOnly: boolean) =>
+  fetchNotifications(unacknowledgedOnly),
+);
+daemonHandle("notifications:ack", (id: number) => acknowledgeNotification(id));
 
 app.whenReady().then(() => {
   createWindow();

@@ -1,10 +1,7 @@
 import { request } from "node:http";
-import { socketPath } from "./daemon-paths.js";
-import type { ConfigRule, DaemonHealth, Notification } from "../shared/types.js";
+import { socketPath } from "../paths.js";
 
-export type { ConfigRule, DaemonHealth, Notification };
-
-function callDaemon<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = request(
@@ -39,20 +36,14 @@ function callDaemon<T>(method: "GET" | "POST" | "DELETE", path: string, body?: u
   });
 }
 
-export const fetchDaemonHealth = () => callDaemon<DaemonHealth>("GET", "/health");
+export const getJson = <T>(path: string) => call<T>("GET", path);
+export const postJson = <T>(path: string, body: unknown) => call<T>("POST", path, body);
 
-export const fetchConfigRules = () => callDaemon<ConfigRule[]>("GET", "/config/rules");
-
-export const createConfigRule = (pattern: string, context: string) =>
-  callDaemon<ConfigRule>("POST", "/config/rules", { pattern, context });
-
-export const deleteConfigRule = (id: number) => callDaemon<void>("DELETE", `/config/rules/${id}`);
-
-export const fetchNotifications = (unacknowledgedOnly: boolean) =>
-  callDaemon<Notification[]>(
-    "GET",
-    `/notifications${unacknowledgedOnly ? "?unacknowledged=true" : ""}`,
-  );
-
-export const acknowledgeNotification = (id: number) =>
-  callDaemon<Notification>("POST", `/notifications/${id}/ack`);
+export function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    let data = "";
+    process.stdin.on("data", (chunk) => (data += chunk));
+    process.stdin.on("end", () => resolve(data));
+    process.stdin.on("error", () => resolve(""));
+  });
+}
