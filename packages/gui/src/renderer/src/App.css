@@ -11,7 +11,7 @@ body {
 
 .shell {
   padding: 2rem;
-  max-width: 40rem;
+  max-width: 100%;
 }
 
 h1 {
@@ -159,4 +159,167 @@ h1 {
 
 .status-up {
   color: #35b37e;
+}
+
+/* ── Campaign grid ── */
+
+.campaign-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.campaign-toolbar select {
+  background: #1b1e27;
+  border: 1px solid #2a2e38;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.campaign-toolbar button {
+  background: #2a2e38;
+  border: none;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.campaign-toolbar button:hover {
+  background: #3a3f50;
+}
+
+.campaign-grid-wrap {
+  overflow-x: auto;
+}
+
+.campaign-grid {
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  min-width: 100%;
+}
+
+.campaign-grid th {
+  background: #1b1e27;
+  color: #9ba1b0;
+  font-weight: 600;
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+  border: 1px solid #2a2e38;
+  white-space: nowrap;
+}
+
+.campaign-grid td {
+  border: 1px solid #2a2e38;
+  padding: 0.35rem 0.6rem;
+  vertical-align: top;
+}
+
+.campaign-grid td.repo-name {
+  color: #9ba1b0;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  background: #1b1e27;
+}
+
+.pr-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 7rem;
+}
+
+/* lifecycle badges */
+.lc {
+  display: inline-block;
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.lc-not-started  { background: #2a2e38; color: #6b7280; }
+.lc-open         { background: #1e3a5f; color: #60a5fa; }
+.lc-approved     { background: #14432a; color: #35b37e; }
+.lc-merged       { background: #1a1a2e; color: #6c86ff; }
+.lc-closed       { background: #1f1f24; color: #6b7280; }
+.lc-changes-requested { background: #422006; color: #fb923c; }
+
+.ci-failing { border-left: 3px solid #e5645a; }
+.ci-passing { border-left: 3px solid #35b37e; }
+
+.pending-badge {
+  font-size: 0.68rem;
+  color: #fb923c;
+}
+
+/* ── Live board ── */
+
+.live-board {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+@media (max-width: 700px) {
+  .live-board { grid-template-columns: 1fr; }
+}
+
+.live-section h2 {
+  font-size: 0.9rem;
+  color: #9ba1b0;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.claim-list,
+.live-notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.claim-card {
+  background: #1b1e27;
+  border: 1px solid #2a2e38;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+}
+
+.claim-card .c-repo {
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+
+.claim-card .c-step {
+  font-size: 0.75rem;
+  color: #9ba1b0;
+}
+
+.claim-card .c-note {
+  font-size: 0.8rem;
+  color: #e7e8ed;
+  margin: 0.25rem 0 0;
+}
+
+.claim-card .c-agent {
+  font-size: 0.72rem;
+  color: #6b7280;
+  margin-top: 0.2rem;
+}
+
+.empty-hint {
+  color: #6b7280;
+  font-size: 0.85rem;
 }

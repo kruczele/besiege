@@ -4,9 +4,14 @@ import {
   acknowledgeNotification,
   createConfigRule,
   deleteConfigRule,
+  fetchCampaignClaims,
+  fetchCampaignPrs,
+  fetchCampaigns,
   fetchConfigRules,
   fetchDaemonHealth,
   fetchNotifications,
+  fetchSteps,
+  triggerCampaignSync,
 } from "./daemon-client.js";
 
 function createWindow(): void {
@@ -48,6 +53,13 @@ daemonHandle("notifications:list", (unacknowledgedOnly: boolean) =>
   fetchNotifications(unacknowledgedOnly),
 );
 daemonHandle("notifications:ack", (id: number) => acknowledgeNotification(id));
+daemonHandle("campaigns:list", fetchCampaigns);
+daemonHandle("campaigns:steps", (campaignId: number) => fetchSteps(campaignId));
+daemonHandle("campaigns:prs", (campaignId: number, needsMe: boolean) =>
+  fetchCampaignPrs(campaignId, needsMe ? "needs-me" : undefined),
+);
+daemonHandle("campaigns:claims", (campaignId: number) => fetchCampaignClaims(campaignId));
+daemonHandle("campaigns:sync", (campaignId: number) => triggerCampaignSync(campaignId));
 
 app.whenReady().then(() => {
   createWindow();

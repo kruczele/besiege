@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ConfigRule, DaemonHealth, DaemonResult, Notification } from "../shared/types.js";
+import type {
+  ActiveClaim,
+  Campaign,
+  CampaignStep,
+  ConfigRule,
+  DaemonHealth,
+  DaemonResult,
+  Notification,
+  PrGridRow,
+} from "../shared/types.js";
 
 export type { DaemonResult };
 
@@ -16,6 +25,16 @@ const api = {
     ipcRenderer.invoke("notifications:list", unacknowledgedOnly),
   acknowledgeNotification: (id: number): Promise<DaemonResult<Notification>> =>
     ipcRenderer.invoke("notifications:ack", id),
+
+  listCampaigns: (): Promise<DaemonResult<Campaign[]>> => ipcRenderer.invoke("campaigns:list"),
+  listSteps: (campaignId: number): Promise<DaemonResult<CampaignStep[]>> =>
+    ipcRenderer.invoke("campaigns:steps", campaignId),
+  listCampaignPrs: (campaignId: number, needsMe: boolean): Promise<DaemonResult<PrGridRow[]>> =>
+    ipcRenderer.invoke("campaigns:prs", campaignId, needsMe),
+  listCampaignClaims: (campaignId: number): Promise<DaemonResult<ActiveClaim[]>> =>
+    ipcRenderer.invoke("campaigns:claims", campaignId),
+  syncCampaign: (campaignId: number): Promise<DaemonResult<{ queued: boolean }>> =>
+    ipcRenderer.invoke("campaigns:sync", campaignId),
 };
 
 contextBridge.exposeInMainWorld("api", api);

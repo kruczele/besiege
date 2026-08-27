@@ -1,7 +1,7 @@
 import { request } from "node:http";
 import { socketPath } from "../paths.js";
 
-function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+function call<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = request(
@@ -38,6 +38,7 @@ function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<
 
 export const getJson = <T>(path: string) => call<T>("GET", path);
 export const postJson = <T>(path: string, body: unknown) => call<T>("POST", path, body);
+export const deleteJson = <T>(path: string) => call<T>("DELETE", path);
 
 export function readStdin(): Promise<string> {
   return new Promise((resolve) => {
