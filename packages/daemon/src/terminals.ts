@@ -2,7 +2,7 @@ import * as pty from "@lydell/node-pty";
 import type { IPty } from "@lydell/node-pty";
 import type Database from "better-sqlite3";
 import type { WebSocket } from "ws";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,23 +41,32 @@ interface AgentAdapterRow {
 // enough; agents just point at it via their own --mcp-config-style flag.
 const MCP_CONFIG_PATH = join(stateDir, "mcp-config.json");
 
+// This module runs as either dist/terminals.js (prod) or src/terminals.ts
+// (dev, under tsx watch) — import.meta.url differs between the two, so it is
+// NOT a stable anchor for the mcp entry point. Going one directory up from
+// wherever this file happens to live always lands on the daemon package
+// root, from which dist/mcp.js — the one built, runnable entry point,
+// regardless of which mode the daemon itself is running under — is stable.
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const MCP_ENTRY_POINT = join(PACKAGE_ROOT, "dist", "mcp.js");
+
+// Regenerated on every call rather than left in place once written: a stale
+// file from a wrong dev/prod mode or a moved install would otherwise wire
+// every future agent session to a command that no longer exists, silently.
 function ensureMcpConfig(): string {
-  if (!existsSync(MCP_CONFIG_PATH)) {
-    mkdirSync(stateDir, { recursive: true });
-    const mcpEntryPoint = join(dirname(fileURLToPath(import.meta.url)), "mcp.js");
-    writeFileSync(
-      MCP_CONFIG_PATH,
-      JSON.stringify(
-        {
-          mcpServers: {
-            besiege: { command: process.execPath, args: [mcpEntryPoint] },
-          },
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(
+    MCP_CONFIG_PATH,
+    JSON.stringify(
+      {
+        mcpServers: {
+          besiege: { command: process.execPath, args: [MCP_ENTRY_POINT] },
         },
-        null,
-        2,
-      ),
-    );
-  }
+      },
+      null,
+      2,
+    ),
+  );
   return MCP_CONFIG_PATH;
 }
 
