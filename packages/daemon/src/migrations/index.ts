@@ -212,4 +212,38 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    name: "0015_agent_adapters",
+    sql: `
+      -- User-editable launch definitions for interactive coding-agent CLIs
+      -- (claude/opencode/agy/...). Deliberately a plain data table rather than
+      -- hardcoded adapter logic in daemon source: flags for third-party CLIs
+      -- are easy to get wrong or for the CLI to change, and the user can fix
+      -- a row here without a code change. Seed rows below are a best-effort
+      -- starting point, not guaranteed-correct forever.
+      CREATE TABLE agent_adapters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        binary TEXT NOT NULL,
+        yolo_flag TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      INSERT INTO agent_adapters (name, binary, yolo_flag, created_at) VALUES
+        ('Claude', 'claude', '--dangerously-skip-permissions', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        ('OpenCode', 'opencode', '--auto', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        ('Antigravity (agy)', 'agy', '--dangerously-skip-permissions', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+    `,
+  },
+  {
+    name: "0016_terminal_sessions_agent",
+    sql: `
+      -- Which agent adapter (if any) a terminal session was launched with, and
+      -- the launch options chosen at creation time. NULL agent_adapter_id means
+      -- a plain shell, the pre-existing default behavior.
+      ALTER TABLE terminal_sessions ADD COLUMN agent_adapter_id INTEGER REFERENCES agent_adapters(id);
+      ALTER TABLE terminal_sessions ADD COLUMN yolo INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE terminal_sessions ADD COLUMN extra_args TEXT;
+    `,
+  },
 ];

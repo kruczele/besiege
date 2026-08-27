@@ -17,6 +17,30 @@ export interface TerminalSessionRow {
   exit_code: number | null;
   created_at: string;
   exited_at: string | null;
+  agent_adapter_id: number | null;
+  yolo: number;
+  extra_args: string | null;
+}
+
+interface AgentAdapterRow {
+  id: number;
+  name: string;
+  binary: string;
+  yolo_flag: string | null;
+  created_at: string;
+}
+
+// Quoted-segment aware tokenizer for the free-text "extra args" field, so
+// e.g. --append-system-prompt "some text" stays a single argv entry instead
+// of being split on the space inside the quotes.
+function splitArgs(input: string): string[] {
+  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  const args: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(input)) !== null) {
+    args.push(match[1] ?? match[2] ?? match[3]);
+  }
+  return args;
 }
 
 interface LiveSession {
@@ -47,15 +71,38 @@ export function spawnSession(
   campaignId: number,
   cwd: string,
   label?: string,
+  agentAdapterId?: number,
+  yolo?: boolean,
+  extraArgs?: string,
 ): TerminalSessionRow {
-  const proc = pty.spawn("zsh", [], { cols: 80, rows: 24, cwd, env: process.env });
+  const adapter = agentAdapterId
+    ? (db.prepare("SELECT * FROM agent_adapters WHERE id = ?").get(agentAdapterId) as
+        | AgentAdapterRow
+        | undefined)
+    : undefined;
+
+  const command = adapter?.binary ?? "zsh";
+  const argv = adapter
+    ? [...(yolo && adapter.yolo_flag ? [adapter.yolo_flag] : []), ...(extraArgs ? splitArgs(extraArgs) : [])]
+    : [];
+
+  const proc = pty.spawn(command, argv, { cols: 80, rows: 24, cwd, env: process.env });
 
   const createdAt = new Date().toISOString();
   const info = db
     .prepare(
-      "INSERT INTO terminal_sessions (campaign_id, label, cwd, pid, status, created_at) VALUES (?, ?, ?, ?, 'active', ?)",
+      "INSERT INTO terminal_sessions (campaign_id, label, cwd, pid, status, created_at, agent_adapter_id, yolo, extra_args) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)",
     )
-    .run(campaignId, label ?? null, cwd, proc.pid, createdAt);
+    .run(
+      campaignId,
+      label ?? adapter?.name ?? null,
+      cwd,
+      proc.pid,
+      createdAt,
+      adapter?.id ?? null,
+      yolo && adapter ? 1 : 0,
+      adapter && extraArgs?.trim() ? extraArgs.trim() : null,
+    );
   const id = Number(info.lastInsertRowid);
 
   const session: LiveSession = { id, pty: proc, buffer: "", subscribers: new Set() };

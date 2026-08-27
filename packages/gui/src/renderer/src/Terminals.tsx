@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import type { Campaign, TerminalSession } from "../../shared/types.js";
+import type { AgentAdapter, Campaign, TerminalSession } from "../../shared/types.js";
 
 const POLL_SESSIONS = 3000;
 
@@ -72,6 +72,18 @@ export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [titles, setTitles] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [adapters, setAdapters] = useState<AgentAdapter[]>([]);
+  const [adapterId, setAdapterId] = useState<string>("");
+  const [yolo, setYolo] = useState(false);
+  const [extraArgs, setExtraArgs] = useState("");
+
+  useEffect(() => {
+    window.api.listAgentAdapters().then((res) => {
+      if (res.ok) setAdapters(res.result);
+    });
+  }, []);
+
+  const selectedAdapter = adapters.find((a) => a.id === Number(adapterId));
 
   useEffect(() => {
     if (campaignId === null) {
@@ -107,20 +119,30 @@ export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
     };
   }, [campaignId]);
 
-  const handleNew = async () => {
+  const handleNew = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (campaignId === null) return;
     setError(null);
     if (!campaign?.defaultDir) {
       setError("This campaign has no default directory set — add one on the Campaigns tab first.");
       return;
     }
-    const res = await window.api.createTerminal(campaignId, undefined, undefined);
+    const res = await window.api.createTerminal(
+      campaignId,
+      undefined,
+      undefined,
+      selectedAdapter?.id,
+      selectedAdapter ? yolo : undefined,
+      selectedAdapter && extraArgs.trim() ? extraArgs.trim() : undefined,
+    );
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setSessions((prev) => [res.result, ...prev]);
     setSelectedId(res.result.id);
+    setYolo(false);
+    setExtraArgs("");
   };
 
   const handleClose = async (id: number) => {
@@ -159,9 +181,33 @@ export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
             </button>
           </div>
         ))}
-        <button className="browser-tab-new" onClick={handleNew} title="New terminal">
-          +
-        </button>
+        <form className="terminal-launcher" onSubmit={handleNew}>
+          <select value={adapterId} onChange={(e) => setAdapterId(e.target.value)} title="Agent">
+            <option value="">Shell</option>
+            {adapters.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          {selectedAdapter?.yoloFlag && (
+            <label className="terminal-launcher-yolo" title={selectedAdapter.yoloFlag}>
+              <input type="checkbox" checked={yolo} onChange={(e) => setYolo(e.target.checked)} />
+              yolo
+            </label>
+          )}
+          {selectedAdapter && (
+            <input
+              className="terminal-launcher-args"
+              placeholder="extra args"
+              value={extraArgs}
+              onChange={(e) => setExtraArgs(e.target.value)}
+            />
+          )}
+          <button type="submit" className="browser-tab-new" title="New terminal">
+            +
+          </button>
+        </form>
       </div>
 
       {error && <p className="status status-down">{error}</p>}

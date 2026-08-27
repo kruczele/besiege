@@ -2,6 +2,7 @@ import { request } from "node:http";
 import { socketPath } from "./daemon-paths.js";
 import type {
   ActiveClaim,
+  AgentAdapter,
   Campaign,
   CampaignRepo,
   CampaignStep,
@@ -19,6 +20,7 @@ import type {
 
 export type {
   ActiveClaim,
+  AgentAdapter,
   Campaign,
   CampaignRepo,
   CampaignStep,
@@ -195,9 +197,32 @@ export const deleteFailure = (campaignId: number, id: number) =>
 // Terminal sessions
 export const listTerminals = (campaignId: number) =>
   callDaemon<TerminalSession[]>("GET", `/campaigns/${campaignId}/terminals`);
-export const createTerminal = (campaignId: number, cwd?: string, label?: string) =>
-  callDaemon<TerminalSession>("POST", `/campaigns/${campaignId}/terminals`, { cwd, label });
+export const createTerminal = (
+  campaignId: number,
+  cwd?: string,
+  label?: string,
+  agentAdapterId?: number,
+  yolo?: boolean,
+  extraArgs?: string,
+) =>
+  callDaemon<TerminalSession>("POST", `/campaigns/${campaignId}/terminals`, {
+    cwd,
+    label,
+    agentAdapterId,
+    yolo,
+    extraArgs,
+  });
 export const getTerminal = (id: number) => callDaemon<TerminalSession>("GET", `/terminals/${id}`);
 export const killTerminal = (id: number) =>
   callDaemon<{ ok: boolean }>("POST", `/terminals/${id}/kill`);
 export const deleteTerminal = (id: number) => callDaemon<void>("DELETE", `/terminals/${id}`);
+
+// Agent adapters
+export const fetchAgentAdapters = () => callDaemon<AgentAdapter[]>("GET", "/agents");
+export const createAgentAdapter = (name: string, binary: string, yoloFlag?: string) =>
+  callDaemon<AgentAdapter>("POST", "/agents", { name, binary, yoloFlag });
+export const updateAgentAdapter = (
+  id: number,
+  fields: Partial<{ name: string; binary: string; yoloFlag: string }>,
+) => callDaemon<AgentAdapter>("PATCH", `/agents/${id}`, fields);
+export const deleteAgentAdapter = (id: number) => callDaemon<void>("DELETE", `/agents/${id}`);

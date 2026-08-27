@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   ActiveClaim,
+  AgentAdapter,
   Campaign,
   CampaignStep,
   ConfigRule,
@@ -50,7 +51,6 @@ const api = {
     fields: Partial<{ name: string; description: string | null; default_dir: string | null }>,
   ): Promise<DaemonResult<Campaign>> => ipcRenderer.invoke("campaigns:update", id, fields),
   deleteCampaign: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("campaigns:delete", id),
-  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("dialog:pick-directory"),
 
   listTerminals: (campaignId: number): Promise<DaemonResult<TerminalSession[]>> =>
     ipcRenderer.invoke("terminals:list", campaignId),
@@ -58,10 +58,23 @@ const api = {
     campaignId: number,
     cwd: string | undefined,
     label: string | undefined,
-  ): Promise<DaemonResult<TerminalSession>> => ipcRenderer.invoke("terminals:create", campaignId, cwd, label),
+    agentAdapterId: number | undefined,
+    yolo: boolean | undefined,
+    extraArgs: string | undefined,
+  ): Promise<DaemonResult<TerminalSession>> =>
+    ipcRenderer.invoke("terminals:create", campaignId, cwd, label, agentAdapterId, yolo, extraArgs),
   killTerminal: (id: number): Promise<DaemonResult<{ ok: boolean }>> =>
     ipcRenderer.invoke("terminals:kill", id),
   deleteTerminal: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("terminals:delete", id),
+
+  listAgentAdapters: (): Promise<DaemonResult<AgentAdapter[]>> => ipcRenderer.invoke("agents:list"),
+  createAgentAdapter: (name: string, binary: string, yoloFlag: string | undefined): Promise<DaemonResult<AgentAdapter>> =>
+    ipcRenderer.invoke("agents:create", name, binary, yoloFlag),
+  updateAgentAdapter: (
+    id: number,
+    fields: Partial<{ name: string; binary: string; yoloFlag: string }>,
+  ): Promise<DaemonResult<AgentAdapter>> => ipcRenderer.invoke("agents:update", id, fields),
+  deleteAgentAdapter: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("agents:delete", id),
 
   // Live PTY streaming: openTerminalStream tells main to attach the WS to the
   // daemon (idempotent — safe to call again on remount); attachTerminal wires
