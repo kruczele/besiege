@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.1.1",
   "scripts": {
+    "dev": "pnpm --parallel --filter daemon --filter gui dev",
     "dev:daemon": "pnpm --filter daemon dev",
     "dev:gui": "pnpm --filter gui dev",
     "build": "pnpm -r build"

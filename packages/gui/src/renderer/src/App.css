@@ -474,28 +474,6 @@ h1 {
 
 /* ── Campaign creation ── */
 
-.dir-picker {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.dir-picker button {
-  background: #2a2e38;
-  border: none;
-  border-radius: 4px;
-  color: #e7e8ed;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.82rem;
-  cursor: pointer;
-  align-self: auto;
-}
-
-.dir-picker code {
-  color: #9ba1b0;
-  font-size: 0.78rem;
-}
-
 .new-campaign-form {
   max-width: 28rem;
 }
@@ -586,6 +564,39 @@ h1 {
 
 .browser-tab-new:hover {
   color: #e7e8ed;
+}
+
+.terminal-launcher {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  margin-bottom: 0.1rem;
+  padding-left: 0.5rem;
+}
+
+.terminal-launcher select,
+.terminal-launcher-args {
+  background: #1b1e27;
+  border: 1px solid #2a2e38;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.3rem 0.4rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+}
+
+.terminal-launcher-args {
+  width: 9rem;
+}
+
+.terminal-launcher-yolo {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #9ba1b0;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .terminal-viewport {

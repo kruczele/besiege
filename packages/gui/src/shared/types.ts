@@ -48,6 +48,18 @@ export interface TerminalSession {
   exitCode: number | null;
   createdAt: string;
   exitedAt: string | null;
+  agentAdapterId: number | null;
+  agentName: string | null;
+  yolo: boolean;
+  extraArgs: string | null;
+}
+
+export interface AgentAdapter {
+  id: number;
+  name: string;
+  binary: string;
+  yoloFlag: string | null;
+  createdAt: string;
 }
 
 export interface CampaignStep {

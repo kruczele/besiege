@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type {
   ActiveClaim,
+  AgentAdapter,
   Campaign,
   CampaignStep,
   ConfigRule,
@@ -14,7 +15,7 @@ import { TerminalsMain } from "./Terminals.js";
 const POLL_FAST = 3000;
 const POLL_GRID = 5000;
 
-type Tab = "status" | "campaigns" | "live" | "rules" | "inbox";
+type Tab = "status" | "campaigns" | "live" | "rules" | "agents" | "inbox";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("campaigns");
@@ -31,7 +32,7 @@ export function App() {
         <aside className="sidebar">
           <h1>Besiege</h1>
           <nav className="tabs">
-            {(["status", "campaigns", "live", "rules", "inbox"] as Tab[]).map((t) => (
+            {(["status", "campaigns", "live", "rules", "agents", "inbox"] as Tab[]).map((t) => (
               <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
@@ -44,6 +45,7 @@ export function App() {
             )}
             {tab === "live" && <LivePanel />}
             {tab === "rules" && <RulesPanel />}
+            {tab === "agents" && <AgentsPanel />}
             {tab === "inbox" && <InboxPanel />}
           </div>
         </aside>
@@ -162,20 +164,15 @@ function elapsed(iso: string) {
 function NewCampaignForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [defaultDir, setDefaultDir] = useState<string | null>(null);
+  const [defaultDir, setDefaultDir] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-
-  const pickFolder = async () => {
-    const dir = await window.api.pickDirectory();
-    if (dir) setDefaultDir(dir);
-  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setCreating(true);
-    const res = await window.api.createCampaign(name, description || undefined, defaultDir ?? undefined);
+    const res = await window.api.createCampaign(name, description || undefined, defaultDir.trim() || undefined);
     setCreating(false);
     if (!res.ok) {
       setError(res.error);
@@ -183,7 +180,7 @@ function NewCampaignForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
     }
     setName("");
     setDescription("");
-    setDefaultDir(null);
+    setDefaultDir("");
     onCreated(res.result);
   };
 
@@ -195,12 +192,11 @@ function NewCampaignForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
       />
-      <div className="dir-picker">
-        <button type="button" onClick={pickFolder}>
-          Choose folder…
-        </button>
-        <code>{defaultDir ?? "no default directory chosen"}</code>
-      </div>
+      <input
+        placeholder="Default directory (optional)"
+        value={defaultDir}
+        onChange={(e) => setDefaultDir(e.target.value)}
+      />
       {error && <p className="status status-down">{error}</p>}
       <button type="submit" disabled={creating || !name.trim()}>
         {creating ? "Creating…" : "Create campaign"}
@@ -591,6 +587,141 @@ function RulesPanel() {
                 </div>
               </div>
               <span className="rule-item-context">{rule.context}</span>
+            </li>
+          ),
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function AgentsPanel() {
+  const [adapters, setAdapters] = useState<AgentAdapter[] | null>(null);
+  const [name, setName] = useState("");
+  const [binary, setBinary] = useState("");
+  const [yoloFlag, setYoloFlag] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editBinary, setEditBinary] = useState("");
+  const [editYoloFlag, setEditYoloFlag] = useState("");
+
+  const reload = async () => {
+    const res = await window.api.listAgentAdapters();
+    setAdapters(res.ok ? res.result : null);
+    if (!res.ok) setError(res.error);
+  };
+
+  useEffect(() => {
+    reload();
+  }, []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const res = await window.api.createAgentAdapter(name, binary, yoloFlag || undefined);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setName("");
+    setBinary("");
+    setYoloFlag("");
+    reload();
+  };
+
+  const remove = async (id: number) => {
+    const res = await window.api.deleteAgentAdapter(id);
+    if (!res.ok) setError(res.error);
+    reload();
+  };
+
+  const startEdit = (adapter: AgentAdapter) => {
+    setEditingId(adapter.id);
+    setEditName(adapter.name);
+    setEditBinary(adapter.binary);
+    setEditYoloFlag(adapter.yoloFlag ?? "");
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingId === null) return;
+    setError(null);
+    const res = await window.api.updateAgentAdapter(editingId, {
+      name: editName,
+      binary: editBinary,
+      yoloFlag: editYoloFlag,
+    });
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setEditingId(null);
+    reload();
+  };
+
+  return (
+    <div className="panel">
+      <form className="rule-form" onSubmit={submit}>
+        <input placeholder="name (e.g. Claude)" value={name} onChange={(e) => setName(e.target.value)} />
+        <input placeholder="binary (e.g. claude)" value={binary} onChange={(e) => setBinary(e.target.value)} />
+        <input
+          placeholder="yolo flag (optional, e.g. --dangerously-skip-permissions)"
+          value={yoloFlag}
+          onChange={(e) => setYoloFlag(e.target.value)}
+        />
+        <button type="submit">Add agent</button>
+      </form>
+      {error && <p className="status status-down">{error}</p>}
+      {adapters === null && <p className="status status-pending">Loading…</p>}
+      {adapters?.length === 0 && <p className="status status-pending">No agents yet.</p>}
+      <ul className="rule-list">
+        {adapters?.map((adapter) =>
+          editingId === adapter.id ? (
+            <li key={adapter.id} className="rule-item">
+              <form className="rule-edit-form" onSubmit={saveEdit}>
+                <div className="rule-item-row">
+                  <input
+                    className="rule-edit-pattern"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                  />
+                  <div className="rule-item-actions">
+                    <button type="submit">Save</button>
+                    <button type="button" onClick={cancelEdit}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+                <input
+                  className="rule-edit-pattern"
+                  placeholder="binary"
+                  value={editBinary}
+                  onChange={(e) => setEditBinary(e.target.value)}
+                />
+                <input
+                  className="rule-edit-pattern"
+                  placeholder="yolo flag (optional)"
+                  value={editYoloFlag}
+                  onChange={(e) => setEditYoloFlag(e.target.value)}
+                />
+              </form>
+            </li>
+          ) : (
+            <li key={adapter.id} className="rule-item">
+              <div className="rule-item-row">
+                <code>{adapter.name}</code>
+                <div className="rule-item-actions">
+                  <button onClick={() => startEdit(adapter)}>Edit</button>
+                  <button onClick={() => remove(adapter.id)}>Delete</button>
+                </div>
+              </div>
+              <span className="rule-item-context">
+                {adapter.binary}
+                {adapter.yoloFlag ? ` · ${adapter.yoloFlag}` : ""}
+              </span>
             </li>
           ),
         )}

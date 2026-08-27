@@ -15,7 +15,17 @@ interface CampaignRow {
   default_dir: string | null;
 }
 
-const toSession = (r: TerminalSessionRow) => ({
+interface TerminalSessionWithAgentRow extends TerminalSessionRow {
+  agent_name: string | null;
+}
+
+const SELECT_SESSION = `
+  SELECT ts.*, aa.name AS agent_name
+  FROM terminal_sessions ts
+  LEFT JOIN agent_adapters aa ON aa.id = ts.agent_adapter_id
+`;
+
+const toSession = (r: TerminalSessionWithAgentRow) => ({
   id: r.id,
   campaignId: r.campaign_id,
   label: r.label,
@@ -25,6 +35,10 @@ const toSession = (r: TerminalSessionRow) => ({
   exitCode: r.exit_code,
   createdAt: r.created_at,
   exitedAt: r.exited_at,
+  agentAdapterId: r.agent_adapter_id,
+  agentName: r.agent_name,
+  yolo: Boolean(r.yolo),
+  extraArgs: r.extra_args,
 });
 
 export function registerTerminalRoutes(app: FastifyInstance, db: Database.Database) {
@@ -37,38 +51,56 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
         return { error: "campaign not found" };
       }
       const rows = db
-        .prepare("SELECT * FROM terminal_sessions WHERE campaign_id = ? ORDER BY id DESC")
-        .all(req.params.campaignId) as TerminalSessionRow[];
+        .prepare(`${SELECT_SESSION} WHERE ts.campaign_id = ? ORDER BY ts.id DESC`)
+        .all(req.params.campaignId) as TerminalSessionWithAgentRow[];
       return rows.map(toSession);
     },
   );
 
-  app.post<{ Params: { campaignId: string }; Body: { cwd?: string; label?: string } }>(
-    "/campaigns/:campaignId/terminals",
-    async (req, reply) => {
-      const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(req.params.campaignId) as
-        | CampaignRow
-        | undefined;
-      if (!campaign) {
-        reply.code(404);
-        return { error: "campaign not found" };
-      }
+  app.post<{
+    Params: { campaignId: string };
+    Body: { cwd?: string; label?: string; agentAdapterId?: number; yolo?: boolean; extraArgs?: string };
+  }>("/campaigns/:campaignId/terminals", async (req, reply) => {
+    const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(req.params.campaignId) as
+      | CampaignRow
+      | undefined;
+    if (!campaign) {
+      reply.code(404);
+      return { error: "campaign not found" };
+    }
 
-      const cwd = req.body?.cwd?.trim() || campaign.default_dir;
-      if (!cwd) {
+    const cwd = req.body?.cwd?.trim() || campaign.default_dir;
+    if (!cwd) {
+      reply.code(400);
+      return { error: "campaign has no default_dir; pass cwd explicitly" };
+    }
+
+    const agentAdapterId = req.body?.agentAdapterId;
+    if (agentAdapterId !== undefined) {
+      const adapter = db.prepare("SELECT id FROM agent_adapters WHERE id = ?").get(agentAdapterId);
+      if (!adapter) {
         reply.code(400);
-        return { error: "campaign has no default_dir; pass cwd explicitly" };
+        return { error: "agent adapter not found" };
       }
+    }
 
-      const row = spawnSession(db, Number(req.params.campaignId), cwd, req.body?.label?.trim());
-      reply.code(201);
-      return toSession(row);
-    },
-  );
+    const row = spawnSession(
+      db,
+      Number(req.params.campaignId),
+      cwd,
+      req.body?.label?.trim(),
+      agentAdapterId,
+      req.body?.yolo,
+      req.body?.extraArgs,
+    );
+    const withAgent = db.prepare(`${SELECT_SESSION} WHERE ts.id = ?`).get(row.id) as TerminalSessionWithAgentRow;
+    reply.code(201);
+    return toSession(withAgent);
+  });
 
   app.get<{ Params: { id: string } }>("/terminals/:id", async (req, reply) => {
-    const row = db.prepare("SELECT * FROM terminal_sessions WHERE id = ?").get(req.params.id) as
-      | TerminalSessionRow
+    const row = db.prepare(`${SELECT_SESSION} WHERE ts.id = ?`).get(req.params.id) as
+      | TerminalSessionWithAgentRow
       | undefined;
     if (!row) {
       reply.code(404);

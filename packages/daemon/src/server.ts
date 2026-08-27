@@ -9,6 +9,7 @@ import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerPrRoutes } from "./routes/prs.js";
 import { registerFailureRoutes } from "./routes/failures.js";
 import { registerTerminalRoutes } from "./routes/terminals.js";
+import { registerAgentRoutes } from "./routes/agents.js";
 import type { syncPr, syncCampaign } from "./github.js";
 
 type SyncPrFn = typeof syncPr;
@@ -37,6 +38,7 @@ export async function buildServer(
   registerPrRoutes(app, db, syncPrFn, syncCampaignFn);
   registerFailureRoutes(app, db);
   registerTerminalRoutes(app, db);
+  registerAgentRoutes(app, db);
 
   return app;
 }

@@ -1,13 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage } from "electron";
 import { join } from "node:path";
 import {
   acknowledgeNotification,
+  createAgentAdapter,
   createCampaign,
   createConfigRule,
   createTerminal,
+  deleteAgentAdapter,
   deleteCampaign,
   deleteConfigRule,
   deleteTerminal,
+  fetchAgentAdapters,
   fetchCampaignClaims,
   fetchCampaignPrs,
   fetchCampaigns,
@@ -18,6 +21,7 @@ import {
   killTerminal,
   listTerminals,
   triggerCampaignSync,
+  updateAgentAdapter,
   updateCampaign,
   updateConfigRule,
 } from "./daemon-client.js";
@@ -84,18 +88,27 @@ daemonHandle("campaigns:create", (name: string, description: string | undefined,
 daemonHandle("campaigns:update", (id: number, fields: Record<string, unknown>) => updateCampaign(id, fields));
 daemonHandle("campaigns:delete", (id: number) => deleteCampaign(id));
 
-ipcMain.handle("dialog:pick-directory", async () => {
-  const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
-  if (result.canceled || result.filePaths.length === 0) return null;
-  return result.filePaths[0];
-});
-
 daemonHandle("terminals:list", (campaignId: number) => listTerminals(campaignId));
-daemonHandle("terminals:create", (campaignId: number, cwd: string | undefined, label: string | undefined) =>
-  createTerminal(campaignId, cwd, label),
+daemonHandle(
+  "terminals:create",
+  (
+    campaignId: number,
+    cwd: string | undefined,
+    label: string | undefined,
+    agentAdapterId: number | undefined,
+    yolo: boolean | undefined,
+    extraArgs: string | undefined,
+  ) => createTerminal(campaignId, cwd, label, agentAdapterId, yolo, extraArgs),
 );
 daemonHandle("terminals:kill", (id: number) => killTerminal(id));
 daemonHandle("terminals:delete", (id: number) => deleteTerminal(id));
+
+daemonHandle("agents:list", fetchAgentAdapters);
+daemonHandle("agents:create", (name: string, binary: string, yoloFlag: string | undefined) =>
+  createAgentAdapter(name, binary, yoloFlag),
+);
+daemonHandle("agents:update", (id: number, fields: Record<string, unknown>) => updateAgentAdapter(id, fields));
+daemonHandle("agents:delete", (id: number) => deleteAgentAdapter(id));
 
 ipcMain.handle("terminal:open", (event, id: number) => {
   terminalBridge.attach(event.sender, id);
