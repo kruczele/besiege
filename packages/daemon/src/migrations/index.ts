@@ -173,6 +173,9 @@ export const migrations: Migration[] = [
   {
     name: "0012_prs_failure_sig_index",
     sql: `
+      -- Column was reserved (see 0008 comment) but never actually added until now.
+      ALTER TABLE prs ADD COLUMN ci_failure_signature_id INTEGER REFERENCES failure_signatures(id);
+
       -- Index for efficient lookup of PRs by failure signature (used by sync engine).
       CREATE INDEX IF NOT EXISTS prs_failure_sig_idx
         ON prs(ci_failure_signature_id)
