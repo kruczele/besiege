@@ -49,6 +49,63 @@ const COMMANDS = {
     console.log("click-text", JSON.stringify(text), "->", r);
   },
 
+  async click(sel) {
+    if (!page) return console.log("ERROR: launch first");
+    const r = await page.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (!el) return "NOT_FOUND";
+      el.click();
+      return "OK";
+    }, sel);
+    console.log("click", sel, "->", r);
+  },
+
+  // fill: set a form field's value via the DOM and dispatch an input event
+  // (React's onChange listens for this) — sel and value are split on the
+  // first "|", since values may contain spaces.
+  async fill(arg) {
+    if (!page) return console.log("ERROR: launch first");
+    const idx = arg.indexOf("|");
+    if (idx === -1) return console.log("usage: fill <selector>|<value>");
+    const sel = arg.slice(0, idx);
+    const value = arg.slice(idx + 1);
+    const r = await page.evaluate(
+      ({ s, v }) => {
+        const el = document.querySelector(s);
+        if (!el) return "NOT_FOUND";
+        const proto = el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+        setter.call(el, v);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        return "OK";
+      },
+      { s: sel, v: value },
+    );
+    console.log("fill", sel, "->", r);
+  },
+
+  async type(text) {
+    if (!page) return console.log("ERROR: launch first");
+    await page.keyboard.type(text, { delay: 20 });
+    console.log("typed:", JSON.stringify(text));
+  },
+
+  async press(key) {
+    if (!page) return console.log("ERROR: launch first");
+    await page.keyboard.press(key);
+    console.log("pressed:", key);
+  },
+
+  async eval(expr) {
+    if (!page) return console.log("ERROR: launch first");
+    try {
+      const r = await page.evaluate(expr);
+      console.log("eval ->", JSON.stringify(r));
+    } catch (e) {
+      console.log("ERROR:", e.message);
+    }
+  },
+
   async text(sel) {
     if (!page) return console.log("ERROR: launch first");
     console.log(

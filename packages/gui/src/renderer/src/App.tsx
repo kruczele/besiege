@@ -9,11 +9,12 @@ import type {
   Notification,
   PrGridRow,
 } from "../../shared/types.js";
+import { TerminalsPanel } from "./Terminals.js";
 
 const POLL_FAST = 3000;
 const POLL_GRID = 5000;
 
-type Tab = "status" | "campaigns" | "live" | "rules" | "inbox";
+type Tab = "status" | "campaigns" | "terminals" | "live" | "rules" | "inbox";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("campaigns");
@@ -22,7 +23,7 @@ export function App() {
     <main className="shell">
       <h1>Besiege</h1>
       <nav className="tabs">
-        {(["status", "campaigns", "live", "rules", "inbox"] as Tab[]).map((t) => (
+        {(["status", "campaigns", "terminals", "live", "rules", "inbox"] as Tab[]).map((t) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -30,6 +31,7 @@ export function App() {
       </nav>
       {tab === "status" && <StatusPanel />}
       {tab === "campaigns" && <CampaignsPanel />}
+      {tab === "terminals" && <TerminalsPanel />}
       {tab === "live" && <LivePanel />}
       {tab === "rules" && <RulesPanel />}
       {tab === "inbox" && <InboxPanel />}
@@ -101,6 +103,56 @@ function elapsed(iso: string) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+function NewCampaignForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [defaultDir, setDefaultDir] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const pickFolder = async () => {
+    const dir = await window.api.pickDirectory();
+    if (dir) setDefaultDir(dir);
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setCreating(true);
+    const res = await window.api.createCampaign(name, description || undefined, defaultDir ?? undefined);
+    setCreating(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setName("");
+    setDescription("");
+    setDefaultDir(null);
+    onCreated(res.result);
+  };
+
+  return (
+    <form className="rule-form new-campaign-form" onSubmit={submit}>
+      <input placeholder="Campaign name" value={name} onChange={(e) => setName(e.target.value)} />
+      <textarea
+        placeholder="Description (optional)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+      <div className="dir-picker">
+        <button type="button" onClick={pickFolder}>
+          Choose folder…
+        </button>
+        <code>{defaultDir ?? "no default directory chosen"}</code>
+      </div>
+      {error && <p className="status status-down">{error}</p>}
+      <button type="submit" disabled={creating || !name.trim()}>
+        {creating ? "Creating…" : "Create campaign"}
+      </button>
+    </form>
+  );
+}
+
 function CampaignsPanel() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -108,15 +160,26 @@ function CampaignsPanel() {
   const [prs, setPrs] = useState<PrGridRow[]>([]);
   const [needsMe, setNeedsMe] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [showNewForm, setShowNewForm] = useState(false);
 
-  useEffect(() => {
+  const reloadCampaigns = (selectId?: number) => {
     window.api.listCampaigns().then((res) => {
-      if (res.ok && res.result.length > 0) {
+      if (res.ok) {
         setCampaigns(res.result);
-        setSelectedId(res.result[0].id);
+        if (selectId !== undefined) setSelectedId(selectId);
+        else if (res.result.length > 0 && selectedId === null) setSelectedId(res.result[0].id);
       }
     });
+  };
+
+  useEffect(() => {
+    reloadCampaigns();
   }, []);
+
+  const handleCreated = (c: Campaign) => {
+    setShowNewForm(false);
+    reloadCampaigns(c.id);
+  };
 
   useEffect(() => {
     if (selectedId === null) return;
@@ -153,7 +216,12 @@ function CampaignsPanel() {
   for (const p of prs) prIndex.set(`${p.repoName}::${p.stepId}`, p);
 
   if (campaigns.length === 0) {
-    return <p className="status status-pending">No campaigns yet. Create one via the daemon API.</p>;
+    return (
+      <div className="panel">
+        <p className="status status-pending">No campaigns yet.</p>
+        <NewCampaignForm onCreated={handleCreated} />
+      </div>
+    );
   }
 
   return (
@@ -180,7 +248,12 @@ function CampaignsPanel() {
         <button onClick={handleSync} disabled={syncing}>
           {syncing ? "Syncing…" : "Sync GitHub"}
         </button>
+        <button onClick={() => setShowNewForm((v) => !v)}>
+          {showNewForm ? "Cancel" : "+ New Campaign"}
+        </button>
       </div>
+
+      {showNewForm && <NewCampaignForm onCreated={handleCreated} />}
 
       {repos.length === 0 ? (
         <p className="status status-pending">

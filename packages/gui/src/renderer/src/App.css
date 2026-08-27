@@ -323,3 +323,89 @@ h1 {
   color: #6b7280;
   font-size: 0.85rem;
 }
+
+/* ── Campaign creation ── */
+
+.dir-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.dir-picker button {
+  background: #2a2e38;
+  border: none;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  align-self: auto;
+}
+
+.dir-picker code {
+  color: #9ba1b0;
+  font-size: 0.78rem;
+}
+
+.new-campaign-form {
+  max-width: 28rem;
+}
+
+/* ── Terminals ── */
+
+.terminal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 4px;
+  padding: 0.3rem 0.4rem 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  background: #2a2e38;
+  color: #6b7280;
+}
+
+.terminal-tab.active {
+  background: #14432a;
+  color: #35b37e;
+}
+
+.terminal-tab.exited {
+  background: #2a2e38;
+  color: #6b7280;
+}
+
+.terminal-tab.selected {
+  outline: 1px solid #6c86ff;
+}
+
+.terminal-tab-kill {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+}
+
+.terminal-tab-kill:hover {
+  opacity: 1;
+}
+
+.terminal-viewport {
+  height: 26rem;
+  overflow: hidden;
+  border: 1px solid #2a2e38;
+  border-radius: 6px;
+  padding: 0.4rem;
+}

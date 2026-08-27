@@ -3,6 +3,7 @@ import { openDb } from "./db.js";
 import { buildServer } from "./server.js";
 import { dbPath, pidPath, socketPath, stateDir } from "./paths.js";
 import { getGitHubToken, syncAllActivePrs, syncPr, syncCampaign, expireStaleClaims } from "./github.js";
+import { killAllLiveSessions, reapStaleSessionsOnBoot } from "./terminals.js";
 
 function processIsAlive(pid: number): boolean {
   try {
@@ -35,9 +36,12 @@ async function main() {
 
   const db = openDb();
   db.prepare("INSERT INTO daemon_startups (started_at) VALUES (?)").run(new Date().toISOString());
+  // No PTY can survive a daemon restart — any row still marked 'active' from
+  // a previous process is stale by definition.
+  reapStaleSessionsOnBoot(db);
 
   const token = getGitHubToken();
-  const app = buildServer(db, token ? syncPr : null, token ? syncCampaign : null);
+  const app = await buildServer(db, token ? syncPr : null, token ? syncCampaign : null);
   await app.listen({ path: socketPath });
   console.log(`daemon listening on ${socketPath} (db: ${dbPath})`);
 
@@ -55,6 +59,7 @@ async function main() {
 
   const shutdown = async (signal: string) => {
     console.log(`received ${signal}, shutting down`);
+    killAllLiveSessions(db); // don't leave orphaned zombie shells behind
     await app.close();
     db.close();
     rmSync(socketPath, { force: true });

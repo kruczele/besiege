@@ -14,6 +14,7 @@ import type {
   PrGridRow,
   PrPendingTask,
   TaskDefinition,
+  TerminalSession,
 } from "../shared/types.js";
 
 export type {
@@ -30,6 +31,7 @@ export type {
   PrGridRow,
   PrPendingTask,
   TaskDefinition,
+  TerminalSession,
 };
 
 function callDaemon<T>(method: "GET" | "POST" | "DELETE" | "PATCH", path: string, body?: unknown): Promise<T> {
@@ -87,8 +89,12 @@ export const acknowledgeNotification = (id: number) =>
 
 // Campaigns
 export const fetchCampaigns = () => callDaemon<Campaign[]>("GET", "/campaigns");
-export const createCampaign = (name: string, description?: string) =>
-  callDaemon<Campaign>("POST", "/campaigns", { name, description });
+export const createCampaign = (name: string, description?: string, defaultDir?: string) =>
+  callDaemon<Campaign>("POST", "/campaigns", { name, description, default_dir: defaultDir });
+export const updateCampaign = (
+  id: number,
+  fields: Partial<{ name: string; description: string | null; default_dir: string | null }>,
+) => callDaemon<Campaign>("PATCH", `/campaigns/${id}`, fields);
 export const deleteCampaign = (id: number) => callDaemon<void>("DELETE", `/campaigns/${id}`);
 
 // Steps
@@ -182,3 +188,12 @@ export const upsertFailure = (campaignId: number, signature: string, fixContext:
   });
 export const deleteFailure = (campaignId: number, id: number) =>
   callDaemon<void>("DELETE", `/campaigns/${campaignId}/failures/${id}`);
+
+// Terminal sessions
+export const listTerminals = (campaignId: number) =>
+  callDaemon<TerminalSession[]>("GET", `/campaigns/${campaignId}/terminals`);
+export const createTerminal = (campaignId: number, cwd?: string, label?: string) =>
+  callDaemon<TerminalSession>("POST", `/campaigns/${campaignId}/terminals`, { cwd, label });
+export const getTerminal = (id: number) => callDaemon<TerminalSession>("GET", `/terminals/${id}`);
+export const killTerminal = (id: number) =>
+  callDaemon<{ ok: boolean }>("POST", `/terminals/${id}/kill`);

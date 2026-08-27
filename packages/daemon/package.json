@@ -13,14 +13,18 @@
     "cli": "node dist/cli.js"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.3.0",
+    "@lydell/node-pty": "1.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^11.9.1",
     "fastify": "^5.2.1",
-    "minimatch": "^10.2.6"
+    "minimatch": "^10.2.6",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.4",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

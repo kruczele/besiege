@@ -32,7 +32,22 @@ export interface Campaign {
   id: number;
   name: string;
   description: string | null;
+  defaultDir: string | null;
   createdAt: string;
+}
+
+export type TerminalStatus = "active" | "exited";
+
+export interface TerminalSession {
+  id: number;
+  campaignId: number;
+  label: string | null;
+  cwd: string;
+  pid: number | null;
+  status: TerminalStatus;
+  exitCode: number | null;
+  createdAt: string;
+  exitedAt: string | null;
 }
 
 export interface CampaignStep {
