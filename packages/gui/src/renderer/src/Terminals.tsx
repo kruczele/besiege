@@ -6,7 +6,7 @@ import type { Campaign, TerminalSession } from "../../shared/types.js";
 
 const POLL_SESSIONS = 3000;
 
-function TerminalView({ id }: { id: number }) {
+function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,6 +26,11 @@ function TerminalView({ id }: { id: number }) {
     let disposed = false;
     const dataSub = term.onData((data) => {
       window.api.writeTerminal(id, data);
+    });
+    // Tabs rename themselves the way real terminal tabs do: shells and CLIs
+    // (Claude Code included) set this via an OSC 0/2 title escape sequence.
+    const titleSub = term.onTitleChange((title) => {
+      if (title) onTitle(title);
     });
 
     const unsubscribe = window.api.attachTerminal(
@@ -51,6 +56,7 @@ function TerminalView({ id }: { id: number }) {
       disposed = true;
       resizeObserver.disconnect();
       dataSub.dispose();
+      titleSub.dispose();
       unsubscribe();
       window.api.closeTerminalStream(id);
       term.dispose();
@@ -60,29 +66,37 @@ function TerminalView({ id }: { id: number }) {
   return <div className="terminal-viewport" ref={containerRef} />;
 }
 
-export function TerminalsPanel() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [campaignId, setCampaignId] = useState<number | null>(null);
+export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [titles, setTitles] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (campaignId === null) {
+      setCampaign(null);
+      return;
+    }
     window.api.listCampaigns().then((res) => {
-      if (res.ok && res.result.length > 0) {
-        setCampaigns(res.result);
-        setCampaignId(res.result[0].id);
-      }
+      if (res.ok) setCampaign(res.result.find((c) => c.id === campaignId) ?? null);
     });
-  }, []);
+  }, [campaignId]);
 
   useEffect(() => {
-    if (campaignId === null) return;
+    setSelectedId(null);
+    if (campaignId === null) {
+      setSessions([]);
+      return;
+    }
     let cancelled = false;
 
     const poll = async () => {
       const res = await window.api.listTerminals(campaignId);
-      if (!cancelled && res.ok) setSessions(res.result);
+      if (!cancelled && res.ok) {
+        setSessions(res.result);
+        setSelectedId((cur) => cur ?? res.result[0]?.id ?? null);
+      }
     };
 
     poll();
@@ -93,13 +107,11 @@ export function TerminalsPanel() {
     };
   }, [campaignId]);
 
-  const campaign = campaigns.find((c) => c.id === campaignId) ?? null;
-
   const handleNew = async () => {
     if (campaignId === null) return;
     setError(null);
     if (!campaign?.defaultDir) {
-      setError("This campaign has no default directory set — edit it to add one before opening a terminal.");
+      setError("This campaign has no default directory set — add one on the Campaigns tab first.");
       return;
     }
     const res = await window.api.createTerminal(campaignId, undefined, undefined);
@@ -111,54 +123,62 @@ export function TerminalsPanel() {
     setSelectedId(res.result.id);
   };
 
-  const handleKill = async (id: number) => {
-    await window.api.killTerminal(id);
-    const res = await window.api.listTerminals(campaignId!);
-    if (res.ok) setSessions(res.result);
+  const handleClose = async (id: number) => {
+    await window.api.deleteTerminal(id);
+    if (campaignId === null) return;
+    const res = await window.api.listTerminals(campaignId);
+    if (!res.ok) return;
+    setSessions(res.result);
+    setSelectedId((cur) => (cur === id ? (res.result[0]?.id ?? null) : cur));
   };
 
-  if (campaigns.length === 0) {
-    return <p className="status status-pending">No campaigns yet — create one on the Campaigns tab first.</p>;
+  if (campaignId === null) {
+    return <p className="status status-pending main-empty">Select or create a campaign to open a terminal.</p>;
   }
 
   return (
-    <div className="panel">
-      <div className="campaign-toolbar">
-        <select value={campaignId ?? ""} onChange={(e) => { setCampaignId(Number(e.target.value)); setSelectedId(null); }}>
-          {campaigns.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <button onClick={handleNew}>+ New terminal</button>
-      </div>
-
-      {error && <p className="status status-down">{error}</p>}
-
-      <div className="terminal-tabs">
-        {sessions.length === 0 && <p className="empty-hint">No terminals for this campaign yet.</p>}
+    <div className="terminal-area">
+      <div className="browser-tabs">
         {sessions.map((s) => (
           <div
             key={s.id}
-            className={`terminal-tab ${s.status === "active" ? "active" : "exited"} ${selectedId === s.id ? "selected" : ""}`}
+            className={`browser-tab ${s.status === "active" ? "active" : "exited"} ${selectedId === s.id ? "selected" : ""}`}
             onClick={() => setSelectedId(s.id)}
           >
-            <span>{s.label ?? `Terminal #${s.id}`}</span>
+            <span className="browser-tab-dot" />
+            <span className="browser-tab-title">{titles[s.id] ?? s.label ?? `Terminal #${s.id}`}</span>
             <button
-              className="terminal-tab-kill"
+              className="browser-tab-kill"
+              title="Close terminal"
               onClick={(e) => {
                 e.stopPropagation();
-                handleKill(s.id);
+                handleClose(s.id);
               }}
             >
               ×
             </button>
           </div>
         ))}
+        <button className="browser-tab-new" onClick={handleNew} title="New terminal">
+          +
+        </button>
       </div>
 
-      {selectedId !== null && <TerminalView key={selectedId} id={selectedId} />}
+      {error && <p className="status status-down">{error}</p>}
+
+      {sessions.length === 0 ? (
+        <p className="status status-pending main-empty">
+          No terminals for {campaign?.name ?? "this campaign"} yet — click + to open one.
+        </p>
+      ) : (
+        selectedId !== null && (
+          <TerminalView
+            key={selectedId}
+            id={selectedId}
+            onTitle={(title) => setTitles((prev) => ({ ...prev, [selectedId]: title }))}
+          />
+        )
+      )}
     </div>
   );
 }

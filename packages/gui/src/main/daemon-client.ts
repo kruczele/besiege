@@ -76,6 +76,9 @@ export const fetchConfigRules = () => callDaemon<ConfigRule[]>("GET", "/config/r
 export const createConfigRule = (pattern: string, context: string) =>
   callDaemon<ConfigRule>("POST", "/config/rules", { pattern, context });
 
+export const updateConfigRule = (id: number, fields: Partial<{ pattern: string; context: string }>) =>
+  callDaemon<ConfigRule>("PATCH", `/config/rules/${id}`, fields);
+
 export const deleteConfigRule = (id: number) => callDaemon<void>("DELETE", `/config/rules/${id}`);
 
 export const fetchNotifications = (unacknowledgedOnly: boolean) =>
@@ -197,3 +200,4 @@ export const createTerminal = (campaignId: number, cwd?: string, label?: string)
 export const getTerminal = (id: number) => callDaemon<TerminalSession>("GET", `/terminals/${id}`);
 export const killTerminal = (id: number) =>
   callDaemon<{ ok: boolean }>("POST", `/terminals/${id}/kill`);
+export const deleteTerminal = (id: number) => callDaemon<void>("DELETE", `/terminals/${id}`);

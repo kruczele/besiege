@@ -117,6 +117,19 @@ export function killSession(db: Database.Database, id: number): boolean {
   return true;
 }
 
+// Unlike killSession (which stops the process but keeps the row around so
+// its scrollback stays reviewable), this permanently removes the tab — the
+// only way an already-exited session ever leaves the list.
+export function removeSession(db: Database.Database, id: number): boolean {
+  const session = live.get(id);
+  if (session) {
+    live.delete(id);
+    session.pty.kill();
+  }
+  const result = db.prepare("DELETE FROM terminal_sessions WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
 export function killAllLiveSessions(db: Database.Database): void {
   for (const [id, session] of [...live]) {
     live.delete(id);

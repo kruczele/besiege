@@ -19,6 +19,10 @@ const api = {
   listConfigRules: (): Promise<DaemonResult<ConfigRule[]>> => ipcRenderer.invoke("config:list"),
   createConfigRule: (pattern: string, context: string): Promise<DaemonResult<ConfigRule>> =>
     ipcRenderer.invoke("config:create", pattern, context),
+  updateConfigRule: (
+    id: number,
+    fields: Partial<{ pattern: string; context: string }>,
+  ): Promise<DaemonResult<ConfigRule>> => ipcRenderer.invoke("config:update", id, fields),
   deleteConfigRule: (id: number): Promise<DaemonResult<void>> =>
     ipcRenderer.invoke("config:delete", id),
 
@@ -57,6 +61,7 @@ const api = {
   ): Promise<DaemonResult<TerminalSession>> => ipcRenderer.invoke("terminals:create", campaignId, cwd, label),
   killTerminal: (id: number): Promise<DaemonResult<{ ok: boolean }>> =>
     ipcRenderer.invoke("terminals:kill", id),
+  deleteTerminal: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("terminals:delete", id),
 
   // Live PTY streaming: openTerminalStream tells main to attach the WS to the
   // daemon (idempotent — safe to call again on remount); attachTerminal wires
@@ -68,6 +73,16 @@ const api = {
   writeTerminal: (id: number, data: string): Promise<void> => ipcRenderer.invoke("terminal:write", id, data),
   resizeTerminal: (id: number, cols: number, rows: number): Promise<void> =>
     ipcRenderer.invoke("terminal:resize", id, cols, rows),
+  minimizeWindow: (): Promise<void> => ipcRenderer.invoke("window:minimize"),
+  toggleMaximizeWindow: (): Promise<void> => ipcRenderer.invoke("window:toggle-maximize"),
+  closeWindow: (): Promise<void> => ipcRenderer.invoke("window:close"),
+  isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke("window:is-maximized"),
+  onWindowMaximizeChanged: (onChange: (maximized: boolean) => void): (() => void) => {
+    const handler = (_event: unknown, maximized: boolean) => onChange(maximized);
+    ipcRenderer.on("window:maximize-changed", handler);
+    return () => ipcRenderer.removeListener("window:maximize-changed", handler);
+  },
+
   attachTerminal: (
     id: number,
     onData: (chunk: string) => void,

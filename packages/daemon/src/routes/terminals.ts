@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import {
   attachSubscriber,
   killSession,
+  removeSession,
   resizeSession,
   spawnSession,
   writeToSession,
@@ -86,6 +87,15 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
     }
     killSession(db, Number(req.params.id));
     return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>("/terminals/:id", async (req, reply) => {
+    const removed = removeSession(db, Number(req.params.id));
+    if (!removed) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    reply.code(204);
   });
 
   app.get<{ Params: { id: string } }>("/terminals/:id/stream", { websocket: true }, (socket, req) => {
