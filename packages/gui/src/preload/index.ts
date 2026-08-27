@@ -8,6 +8,7 @@ import type {
   DaemonResult,
   Notification,
   PrGridRow,
+  TerminalSession,
 } from "../shared/types.js";
 
 export type { DaemonResult };
@@ -18,6 +19,10 @@ const api = {
   listConfigRules: (): Promise<DaemonResult<ConfigRule[]>> => ipcRenderer.invoke("config:list"),
   createConfigRule: (pattern: string, context: string): Promise<DaemonResult<ConfigRule>> =>
     ipcRenderer.invoke("config:create", pattern, context),
+  updateConfigRule: (
+    id: number,
+    fields: Partial<{ pattern: string; context: string }>,
+  ): Promise<DaemonResult<ConfigRule>> => ipcRenderer.invoke("config:update", id, fields),
   deleteConfigRule: (id: number): Promise<DaemonResult<void>> =>
     ipcRenderer.invoke("config:delete", id),
 
@@ -35,6 +40,67 @@ const api = {
     ipcRenderer.invoke("campaigns:claims", campaignId),
   syncCampaign: (campaignId: number): Promise<DaemonResult<{ queued: boolean }>> =>
     ipcRenderer.invoke("campaigns:sync", campaignId),
+  createCampaign: (
+    name: string,
+    description: string | undefined,
+    defaultDir: string | undefined,
+  ): Promise<DaemonResult<Campaign>> => ipcRenderer.invoke("campaigns:create", name, description, defaultDir),
+  updateCampaign: (
+    id: number,
+    fields: Partial<{ name: string; description: string | null; default_dir: string | null }>,
+  ): Promise<DaemonResult<Campaign>> => ipcRenderer.invoke("campaigns:update", id, fields),
+  deleteCampaign: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("campaigns:delete", id),
+  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("dialog:pick-directory"),
+
+  listTerminals: (campaignId: number): Promise<DaemonResult<TerminalSession[]>> =>
+    ipcRenderer.invoke("terminals:list", campaignId),
+  createTerminal: (
+    campaignId: number,
+    cwd: string | undefined,
+    label: string | undefined,
+  ): Promise<DaemonResult<TerminalSession>> => ipcRenderer.invoke("terminals:create", campaignId, cwd, label),
+  killTerminal: (id: number): Promise<DaemonResult<{ ok: boolean }>> =>
+    ipcRenderer.invoke("terminals:kill", id),
+  deleteTerminal: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("terminals:delete", id),
+
+  // Live PTY streaming: openTerminalStream tells main to attach the WS to the
+  // daemon (idempotent — safe to call again on remount); attachTerminal wires
+  // this renderer up to receive the resulting data/exit events. contextBridge
+  // can't pass raw sockets/emitters, so this wraps ipcRenderer.on/removeListener
+  // filtered by session id instead of exposing ipcRenderer directly.
+  openTerminalStream: (id: number): Promise<void> => ipcRenderer.invoke("terminal:open", id),
+  closeTerminalStream: (id: number): Promise<void> => ipcRenderer.invoke("terminal:close", id),
+  writeTerminal: (id: number, data: string): Promise<void> => ipcRenderer.invoke("terminal:write", id, data),
+  resizeTerminal: (id: number, cols: number, rows: number): Promise<void> =>
+    ipcRenderer.invoke("terminal:resize", id, cols, rows),
+  minimizeWindow: (): Promise<void> => ipcRenderer.invoke("window:minimize"),
+  toggleMaximizeWindow: (): Promise<void> => ipcRenderer.invoke("window:toggle-maximize"),
+  closeWindow: (): Promise<void> => ipcRenderer.invoke("window:close"),
+  isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke("window:is-maximized"),
+  onWindowMaximizeChanged: (onChange: (maximized: boolean) => void): (() => void) => {
+    const handler = (_event: unknown, maximized: boolean) => onChange(maximized);
+    ipcRenderer.on("window:maximize-changed", handler);
+    return () => ipcRenderer.removeListener("window:maximize-changed", handler);
+  },
+
+  attachTerminal: (
+    id: number,
+    onData: (chunk: string) => void,
+    onExit: (exitCode: number | null) => void,
+  ): (() => void) => {
+    const dataHandler = (_event: unknown, msg: { id: number; chunk: string }) => {
+      if (msg.id === id) onData(msg.chunk);
+    };
+    const exitHandler = (_event: unknown, msg: { id: number; exitCode: number | null }) => {
+      if (msg.id === id) onExit(msg.exitCode);
+    };
+    ipcRenderer.on("terminal:data", dataHandler);
+    ipcRenderer.on("terminal:exit", exitHandler);
+    return () => {
+      ipcRenderer.removeListener("terminal:data", dataHandler);
+      ipcRenderer.removeListener("terminal:exit", exitHandler);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("api", api);

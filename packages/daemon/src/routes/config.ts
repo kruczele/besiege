@@ -50,6 +50,45 @@ export function registerConfigRoutes(app: FastifyInstance, db: Database.Database
     return toRule(row);
   });
 
+  app.patch<{
+    Params: { id: string };
+    Body: Partial<{ pattern: string; context: string }>;
+  }>("/config/rules/:id", async (req, reply) => {
+    const rule = db.prepare("SELECT * FROM config_rules WHERE id = ?").get(req.params.id) as
+      | ConfigRuleRow
+      | undefined;
+    if (!rule) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+
+    const allowed = ["pattern", "context"] as const;
+    const updates: string[] = [];
+    const values: unknown[] = [];
+
+    for (const key of allowed) {
+      const value = (req.body ?? {})[key];
+      if (value === undefined) continue;
+      if (!value.trim()) {
+        reply.code(400);
+        return { error: `${key} cannot be empty` };
+      }
+      updates.push(`${key} = ?`);
+      values.push(value.trim());
+    }
+
+    if (updates.length === 0) {
+      reply.code(400);
+      return { error: "no updatable fields provided" };
+    }
+
+    values.push(req.params.id);
+    db.prepare(`UPDATE config_rules SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+
+    const updated = db.prepare("SELECT * FROM config_rules WHERE id = ?").get(req.params.id) as ConfigRuleRow;
+    return toRule(updated);
+  });
+
   app.delete<{ Params: { id: string } }>("/config/rules/:id", async (req, reply) => {
     const result = db.prepare("DELETE FROM config_rules WHERE id = ?").run(req.params.id);
     if (result.changes === 0) {

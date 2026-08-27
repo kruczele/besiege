@@ -173,10 +173,43 @@ export const migrations: Migration[] = [
   {
     name: "0012_prs_failure_sig_index",
     sql: `
+      -- Column was reserved (see 0008 comment) but never actually added until now.
+      ALTER TABLE prs ADD COLUMN ci_failure_signature_id INTEGER REFERENCES failure_signatures(id);
+
       -- Index for efficient lookup of PRs by failure signature (used by sync engine).
       CREATE INDEX IF NOT EXISTS prs_failure_sig_idx
         ON prs(ci_failure_signature_id)
         WHERE ci_failure_signature_id IS NOT NULL;
+    `,
+  },
+  {
+    name: "0013_campaign_default_dir",
+    sql: `
+      -- Directory a new terminal session for this campaign starts in by default.
+      ALTER TABLE campaigns ADD COLUMN default_dir TEXT;
+    `,
+  },
+  {
+    name: "0014_terminal_sessions",
+    sql: `
+      -- One row per PTY the daemon has ever spawned. 'status' tracks whether the
+      -- process is alive *in this daemon process* — a restart can never resume a
+      -- live PTY, so boot logic marks all 'active' rows 'exited' (exit_code NULL,
+      -- meaning "lost to a daemon restart" rather than a real exit) before the
+      -- HTTP server starts listening. Scrollback itself is NOT persisted here —
+      -- it lives in an in-memory ring buffer per session and is lost on restart
+      -- same as the live process is.
+      CREATE TABLE terminal_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+        label TEXT,
+        cwd TEXT NOT NULL,
+        pid INTEGER,
+        status TEXT NOT NULL DEFAULT 'active',
+        exit_code INTEGER,
+        created_at TEXT NOT NULL,
+        exited_at TEXT
+      );
     `,
   },
 ];

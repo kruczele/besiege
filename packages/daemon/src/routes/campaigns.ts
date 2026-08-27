@@ -5,6 +5,7 @@ interface CampaignRow {
   id: number;
   name: string;
   description: string | null;
+  default_dir: string | null;
   created_at: string;
 }
 
@@ -27,6 +28,7 @@ const toCampaign = (r: CampaignRow) => ({
   id: r.id,
   name: r.name,
   description: r.description,
+  defaultDir: r.default_dir,
   createdAt: r.created_at,
 });
 
@@ -51,18 +53,56 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
     return (db.prepare("SELECT * FROM campaigns ORDER BY id ASC").all() as CampaignRow[]).map(toCampaign);
   });
 
-  app.post<{ Body: { name?: string; description?: string } }>("/campaigns", async (req, reply) => {
-    const { name, description } = req.body ?? {};
-    if (!name?.trim()) {
-      reply.code(400);
-      return { error: "name is required" };
+  app.post<{ Body: { name?: string; description?: string; default_dir?: string } }>(
+    "/campaigns",
+    async (req, reply) => {
+      const { name, description, default_dir } = req.body ?? {};
+      if (!name?.trim()) {
+        reply.code(400);
+        return { error: "name is required" };
+      }
+      const info = db
+        .prepare("INSERT INTO campaigns (name, description, default_dir, created_at) VALUES (?, ?, ?, ?)")
+        .run(name.trim(), description?.trim() ?? null, default_dir?.trim() ?? null, new Date().toISOString());
+      const row = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(info.lastInsertRowid) as CampaignRow;
+      reply.code(201);
+      return toCampaign(row);
+    },
+  );
+
+  app.patch<{
+    Params: { id: string };
+    Body: Partial<{ name: string; description: string | null; default_dir: string | null }>;
+  }>("/campaigns/:id", async (req, reply) => {
+    const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(req.params.id) as
+      | CampaignRow
+      | undefined;
+    if (!campaign) {
+      reply.code(404);
+      return { error: "not found" };
     }
-    const info = db
-      .prepare("INSERT INTO campaigns (name, description, created_at) VALUES (?, ?, ?)")
-      .run(name.trim(), description?.trim() ?? null, new Date().toISOString());
-    const row = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(info.lastInsertRowid) as CampaignRow;
-    reply.code(201);
-    return toCampaign(row);
+
+    const allowed = ["name", "description", "default_dir"] as const;
+    const updates: string[] = [];
+    const values: unknown[] = [];
+
+    for (const key of allowed) {
+      if (key in (req.body ?? {})) {
+        updates.push(`${key} = ?`);
+        values.push((req.body as Record<string, unknown>)[key]);
+      }
+    }
+
+    if (updates.length === 0) {
+      reply.code(400);
+      return { error: "no updatable fields provided" };
+    }
+
+    values.push(req.params.id);
+    db.prepare(`UPDATE campaigns SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+
+    const updated = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(req.params.id) as CampaignRow;
+    return toCampaign(updated);
   });
 
   app.delete<{ Params: { id: string } }>("/campaigns/:id", async (req, reply) => {

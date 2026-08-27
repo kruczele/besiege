@@ -9,6 +9,7 @@ import type {
   Notification,
   PrGridRow,
 } from "../../shared/types.js";
+import { TerminalsMain } from "./Terminals.js";
 
 const POLL_FAST = 3000;
 const POLL_GRID = 5000;
@@ -17,23 +18,80 @@ type Tab = "status" | "campaigns" | "live" | "rules" | "inbox";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("campaigns");
+  // The campaign currently in focus — set by CampaignsPanel's selector, read
+  // by the main terminal area so "new terminal" knows which campaign it
+  // belongs to. Terminals are children of campaigns, so there's one shared
+  // notion of "current campaign" across the sidebar and the terminal area.
+  const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
 
   return (
-    <main className="shell">
-      <h1>Besiege</h1>
-      <nav className="tabs">
-        {(["status", "campaigns", "live", "rules", "inbox"] as Tab[]).map((t) => (
-          <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </nav>
-      {tab === "status" && <StatusPanel />}
-      {tab === "campaigns" && <CampaignsPanel />}
-      {tab === "live" && <LivePanel />}
-      {tab === "rules" && <RulesPanel />}
-      {tab === "inbox" && <InboxPanel />}
-    </main>
+    <div className="app-frame">
+      <TitleBar />
+      <div className="shell">
+        <aside className="sidebar">
+          <h1>Besiege</h1>
+          <nav className="tabs">
+            {(["status", "campaigns", "live", "rules", "inbox"] as Tab[]).map((t) => (
+              <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-content">
+            {tab === "status" && <StatusPanel />}
+            {tab === "campaigns" && (
+              <CampaignsPanel activeCampaignId={activeCampaignId} onSelectCampaign={setActiveCampaignId} />
+            )}
+            {tab === "live" && <LivePanel />}
+            {tab === "rules" && <RulesPanel />}
+            {tab === "inbox" && <InboxPanel />}
+          </div>
+        </aside>
+        <main className="main">
+          <TerminalsMain campaignId={activeCampaignId} />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ── Title bar ─────────────────────────────────────────────────────────────────
+
+function TitleBar() {
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    window.api.isWindowMaximized().then(setMaximized);
+    return window.api.onWindowMaximizeChanged(setMaximized);
+  }, []);
+
+  return (
+    <div className="title-bar">
+      <span className="title-bar-label">Besiege</span>
+      <div className="title-bar-controls">
+        <button
+          className="title-bar-btn"
+          aria-label="Minimize"
+          onClick={() => window.api.minimizeWindow()}
+        >
+          &#x2013;
+        </button>
+        <button
+          className="title-bar-btn"
+          aria-label={maximized ? "Restore" : "Maximize"}
+          onClick={() => window.api.toggleMaximizeWindow()}
+        >
+          {maximized ? "❐" : "❑"}
+        </button>
+        <button
+          className="title-bar-btn title-bar-btn-close"
+          aria-label="Close"
+          onClick={() => window.api.closeWindow()}
+        >
+          &#x2715;
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -101,22 +159,89 @@ function elapsed(iso: string) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-function CampaignsPanel() {
+function NewCampaignForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [defaultDir, setDefaultDir] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const pickFolder = async () => {
+    const dir = await window.api.pickDirectory();
+    if (dir) setDefaultDir(dir);
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setCreating(true);
+    const res = await window.api.createCampaign(name, description || undefined, defaultDir ?? undefined);
+    setCreating(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setName("");
+    setDescription("");
+    setDefaultDir(null);
+    onCreated(res.result);
+  };
+
+  return (
+    <form className="rule-form new-campaign-form" onSubmit={submit}>
+      <input placeholder="Campaign name" value={name} onChange={(e) => setName(e.target.value)} />
+      <textarea
+        placeholder="Description (optional)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+      <div className="dir-picker">
+        <button type="button" onClick={pickFolder}>
+          Choose folder…
+        </button>
+        <code>{defaultDir ?? "no default directory chosen"}</code>
+      </div>
+      {error && <p className="status status-down">{error}</p>}
+      <button type="submit" disabled={creating || !name.trim()}>
+        {creating ? "Creating…" : "Create campaign"}
+      </button>
+    </form>
+  );
+}
+
+function CampaignsPanel({
+  activeCampaignId,
+  onSelectCampaign,
+}: {
+  activeCampaignId: number | null;
+  onSelectCampaign: (id: number) => void;
+}) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selectedId = activeCampaignId;
   const [steps, setSteps] = useState<CampaignStep[]>([]);
   const [prs, setPrs] = useState<PrGridRow[]>([]);
   const [needsMe, setNeedsMe] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [showNewForm, setShowNewForm] = useState(false);
 
-  useEffect(() => {
+  const reloadCampaigns = (selectId?: number) => {
     window.api.listCampaigns().then((res) => {
-      if (res.ok && res.result.length > 0) {
+      if (res.ok) {
         setCampaigns(res.result);
-        setSelectedId(res.result[0].id);
+        if (selectId !== undefined) onSelectCampaign(selectId);
+        else if (res.result.length > 0 && selectedId === null) onSelectCampaign(res.result[0].id);
       }
     });
+  };
+
+  useEffect(() => {
+    reloadCampaigns();
   }, []);
+
+  const handleCreated = (c: Campaign) => {
+    setShowNewForm(false);
+    reloadCampaigns(c.id);
+  };
 
   useEffect(() => {
     if (selectedId === null) return;
@@ -153,7 +278,12 @@ function CampaignsPanel() {
   for (const p of prs) prIndex.set(`${p.repoName}::${p.stepId}`, p);
 
   if (campaigns.length === 0) {
-    return <p className="status status-pending">No campaigns yet. Create one via the daemon API.</p>;
+    return (
+      <div className="panel">
+        <p className="status status-pending">No campaigns yet.</p>
+        <NewCampaignForm onCreated={handleCreated} />
+      </div>
+    );
   }
 
   return (
@@ -161,7 +291,7 @@ function CampaignsPanel() {
       <div className="campaign-toolbar">
         <select
           value={selectedId ?? ""}
-          onChange={(e) => setSelectedId(Number(e.target.value))}
+          onChange={(e) => onSelectCampaign(Number(e.target.value))}
         >
           {campaigns.map((c) => (
             <option key={c.id} value={c.id}>
@@ -180,7 +310,12 @@ function CampaignsPanel() {
         <button onClick={handleSync} disabled={syncing}>
           {syncing ? "Syncing…" : "Sync GitHub"}
         </button>
+        <button onClick={() => setShowNewForm((v) => !v)}>
+          {showNewForm ? "Cancel" : "+ New Campaign"}
+        </button>
       </div>
+
+      {showNewForm && <NewCampaignForm onCreated={handleCreated} />}
 
       {repos.length === 0 ? (
         <p className="status status-pending">
@@ -346,6 +481,9 @@ function RulesPanel() {
   const [pattern, setPattern] = useState("");
   const [context, setContext] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editPattern, setEditPattern] = useState("");
+  const [editContext, setEditContext] = useState("");
 
   const reload = async () => {
     const res = await window.api.listConfigRules();
@@ -376,6 +514,30 @@ function RulesPanel() {
     reload();
   };
 
+  const startEdit = (rule: ConfigRule) => {
+    setEditingId(rule.id);
+    setEditPattern(rule.pattern);
+    setEditContext(rule.context);
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingId === null) return;
+    setError(null);
+    const res = await window.api.updateConfigRule(editingId, {
+      pattern: editPattern,
+      context: editContext,
+    });
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setEditingId(null);
+    reload();
+  };
+
   return (
     <div className="panel">
       <form className="rule-form" onSubmit={submit}>
@@ -395,13 +557,43 @@ function RulesPanel() {
       {rules === null && <p className="status status-pending">Loading…</p>}
       {rules?.length === 0 && <p className="status status-pending">No rules yet.</p>}
       <ul className="rule-list">
-        {rules?.map((rule) => (
-          <li key={rule.id}>
-            <code>{rule.pattern}</code>
-            <span>{rule.context}</span>
-            <button onClick={() => remove(rule.id)}>Delete</button>
-          </li>
-        ))}
+        {rules?.map((rule) =>
+          editingId === rule.id ? (
+            <li key={rule.id} className="rule-item">
+              <form className="rule-edit-form" onSubmit={saveEdit}>
+                <div className="rule-item-row">
+                  <input
+                    className="rule-edit-pattern"
+                    value={editPattern}
+                    onChange={(e) => setEditPattern(e.target.value)}
+                  />
+                  <div className="rule-item-actions">
+                    <button type="submit">Save</button>
+                    <button type="button" onClick={cancelEdit}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  className="rule-item-context rule-edit-context"
+                  value={editContext}
+                  onChange={(e) => setEditContext(e.target.value)}
+                />
+              </form>
+            </li>
+          ) : (
+            <li key={rule.id} className="rule-item">
+              <div className="rule-item-row">
+                <code>{rule.pattern}</code>
+                <div className="rule-item-actions">
+                  <button onClick={() => startEdit(rule)}>Edit</button>
+                  <button onClick={() => remove(rule.id)}>Delete</button>
+                </div>
+              </div>
+              <span className="rule-item-context">{rule.context}</span>
+            </li>
+          ),
+        )}
       </ul>
     </div>
   );
