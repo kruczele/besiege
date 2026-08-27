@@ -5,10 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:mcp": "tsx watch src/mcp.ts",
+    "dev:cli": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "mcp": "node dist/mcp.js",
+    "cli": "node dist/cli.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^11.9.1",
     "fastify": "^5.2.1",
     "minimatch": "^10.2.6"
