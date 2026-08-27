@@ -8,5 +8,5 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true
   },
-  "include": ["src/renderer/src/**/*", "src/preload/index.ts"]
+  "include": ["src/renderer/src/**/*", "src/preload/index.ts", "src/shared/**/*"]
 }
