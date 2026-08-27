@@ -15,6 +15,7 @@ import type {
   PrGridRow,
   PrPendingTask,
   TaskDefinition,
+  TerminalLayout,
   TerminalSession,
 } from "../shared/types.js";
 
@@ -33,6 +34,7 @@ export type {
   PrGridRow,
   PrPendingTask,
   TaskDefinition,
+  TerminalLayout,
   TerminalSession,
 };
 
@@ -219,10 +221,19 @@ export const deleteTerminal = (id: number) => callDaemon<void>("DELETE", `/termi
 
 // Agent adapters
 export const fetchAgentAdapters = () => callDaemon<AgentAdapter[]>("GET", "/agents");
-export const createAgentAdapter = (name: string, binary: string, yoloFlag?: string) =>
-  callDaemon<AgentAdapter>("POST", "/agents", { name, binary, yoloFlag });
+export const createAgentAdapter = (name: string, binary: string, yoloFlag?: string, mcpConfigFlag?: string) =>
+  callDaemon<AgentAdapter>("POST", "/agents", { name, binary, yoloFlag, mcpConfigFlag });
 export const updateAgentAdapter = (
   id: number,
-  fields: Partial<{ name: string; binary: string; yoloFlag: string }>,
+  fields: Partial<{ name: string; binary: string; yoloFlag: string; mcpConfigFlag: string }>,
 ) => callDaemon<AgentAdapter>("PATCH", `/agents/${id}`, fields);
 export const deleteAgentAdapter = (id: number) => callDaemon<void>("DELETE", `/agents/${id}`);
+
+// Terminal layouts ("meta-tabs": a saved grid of sessions shown together)
+export const fetchLayouts = (campaignId: number) =>
+  callDaemon<TerminalLayout[]>("GET", `/campaigns/${campaignId}/layouts`);
+export const createLayout = (campaignId: number, name: string, sessionIds: number[]) =>
+  callDaemon<TerminalLayout>("POST", `/campaigns/${campaignId}/layouts`, { name, sessionIds });
+export const updateLayout = (id: number, fields: Partial<{ name: string; sessionIds: number[] }>) =>
+  callDaemon<TerminalLayout>("PATCH", `/layouts/${id}`, fields);
+export const deleteLayout = (id: number) => callDaemon<void>("DELETE", `/layouts/${id}`);

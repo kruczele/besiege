@@ -246,4 +246,39 @@ export const migrations: Migration[] = [
       ALTER TABLE terminal_sessions ADD COLUMN extra_args TEXT;
     `,
   },
+  {
+    name: "0017_agent_adapter_mcp_config",
+    sql: `
+      -- Flag template (e.g. "--mcp-config {path}") for wiring the besiege MCP
+      -- server into a spawned agent session. {path} is substituted with the
+      -- absolute path to the daemon-generated mcp-config.json at spawn time.
+      -- NULL means this adapter's CLI has no known MCP-config flag.
+      ALTER TABLE agent_adapters ADD COLUMN mcp_config_flag TEXT;
+      UPDATE agent_adapters SET mcp_config_flag = '--mcp-config {path}' WHERE binary = 'claude';
+    `,
+  },
+  {
+    name: "0018_terminal_layouts",
+    sql: `
+      -- A "meta-tab": a named, saved grid of terminal sessions shown together
+      -- as one visual context (e.g. 4 agents side by side), as an alternative
+      -- to viewing sessions one at a time via the plain session tabs.
+      CREATE TABLE terminal_layouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      -- Ordered membership: which sessions appear in a layout's grid, and in
+      -- what order. position is dense (0..n-1) per layout.
+      CREATE TABLE terminal_layout_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        layout_id INTEGER NOT NULL REFERENCES terminal_layouts(id) ON DELETE CASCADE,
+        terminal_session_id INTEGER NOT NULL REFERENCES terminal_sessions(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        UNIQUE (layout_id, terminal_session_id)
+      );
+    `,
+  },
 ];
