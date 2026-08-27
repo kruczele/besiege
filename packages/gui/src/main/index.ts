@@ -1,14 +1,17 @@
 import { app, BrowserWindow, ipcMain, nativeImage } from "electron";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   acknowledgeNotification,
   createAgentAdapter,
   createCampaign,
   createConfigRule,
+  createLayout,
   createTerminal,
   deleteAgentAdapter,
   deleteCampaign,
   deleteConfigRule,
+  deleteLayout,
   deleteTerminal,
   fetchAgentAdapters,
   fetchCampaignClaims,
@@ -16,6 +19,7 @@ import {
   fetchCampaigns,
   fetchConfigRules,
   fetchDaemonHealth,
+  fetchLayouts,
   fetchNotifications,
   fetchSteps,
   killTerminal,
@@ -24,15 +28,68 @@ import {
   updateAgentAdapter,
   updateCampaign,
   updateConfigRule,
+  updateLayout,
 } from "./daemon-client.js";
 import * as terminalBridge from "./terminal-bridge.js";
 
 const icon = nativeImage.createFromPath(join(__dirname, "../../resources/icon.png"));
 
+// Small persisted window state — remembered across launches so the window
+// doesn't reopen at the small Electron default every time. Not daemon state
+// (it's per-machine display layout, not campaign data), so a flat JSON file
+// under Electron's own userData dir is simpler than a DB round trip.
+interface WindowState {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  maximized: boolean;
+  zoomLevel: number;
+}
+
+const DEFAULT_WINDOW_STATE: WindowState = { width: 1440, height: 900, maximized: false, zoomLevel: 0 };
+const ZOOM_MIN = -4;
+const ZOOM_MAX = 6;
+
+function windowStatePath(): string {
+  return join(app.getPath("userData"), "window-state.json");
+}
+
+function loadWindowState(): WindowState {
+  try {
+    const raw = readFileSync(windowStatePath(), "utf-8");
+    return { ...DEFAULT_WINDOW_STATE, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_WINDOW_STATE;
+  }
+}
+
+function saveWindowState(win: BrowserWindow): void {
+  const bounds = win.getBounds();
+  const state: WindowState = {
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    maximized: win.isMaximized(),
+    zoomLevel: win.webContents.zoomLevel,
+  };
+  try {
+    mkdirSync(app.getPath("userData"), { recursive: true });
+    writeFileSync(windowStatePath(), JSON.stringify(state));
+  } catch {
+    // Best-effort — losing remembered window state isn't worth surfacing.
+  }
+}
+
 function createWindow(): void {
+  const saved = loadWindowState();
+
   const win = new BrowserWindow({
-    width: 960,
-    height: 640,
+    width: saved.width,
+    height: saved.height,
+    x: saved.x,
+    y: saved.y,
     title: "Besiege",
     icon,
     frame: false,
@@ -43,9 +100,15 @@ function createWindow(): void {
     },
   });
 
+  win.webContents.setZoomLevel(saved.zoomLevel);
+  if (saved.maximized) win.maximize();
+
   win.webContents.on("destroyed", () => terminalBridge.detachAll(win.webContents));
   win.on("maximize", () => win.webContents.send("window:maximize-changed", true));
   win.on("unmaximize", () => win.webContents.send("window:maximize-changed", false));
+  win.on("resize", () => saveWindowState(win));
+  win.on("move", () => saveWindowState(win));
+  win.on("close", () => saveWindowState(win));
 
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -104,11 +167,20 @@ daemonHandle("terminals:kill", (id: number) => killTerminal(id));
 daemonHandle("terminals:delete", (id: number) => deleteTerminal(id));
 
 daemonHandle("agents:list", fetchAgentAdapters);
-daemonHandle("agents:create", (name: string, binary: string, yoloFlag: string | undefined) =>
-  createAgentAdapter(name, binary, yoloFlag),
+daemonHandle(
+  "agents:create",
+  (name: string, binary: string, yoloFlag: string | undefined, mcpConfigFlag: string | undefined) =>
+    createAgentAdapter(name, binary, yoloFlag, mcpConfigFlag),
 );
 daemonHandle("agents:update", (id: number, fields: Record<string, unknown>) => updateAgentAdapter(id, fields));
 daemonHandle("agents:delete", (id: number) => deleteAgentAdapter(id));
+
+daemonHandle("layouts:list", (campaignId: number) => fetchLayouts(campaignId));
+daemonHandle("layouts:create", (campaignId: number, name: string, sessionIds: number[]) =>
+  createLayout(campaignId, name, sessionIds),
+);
+daemonHandle("layouts:update", (id: number, fields: Record<string, unknown>) => updateLayout(id, fields));
+daemonHandle("layouts:delete", (id: number) => deleteLayout(id));
 
 ipcMain.handle("terminal:open", (event, id: number) => {
   terminalBridge.attach(event.sender, id);
@@ -137,6 +209,21 @@ ipcMain.handle("window:close", (event) => {
 });
 ipcMain.handle("window:is-maximized", (event) => {
   return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
+});
+
+// No application menu (frame: false, no visible menu bar) to hang zoom
+// accelerators off, so the renderer listens for Ctrl/Cmd +/- itself and
+// calls these instead.
+ipcMain.handle("window:zoom-in", (event) => {
+  const wc = event.sender;
+  wc.setZoomLevel(Math.min(ZOOM_MAX, wc.zoomLevel + 0.5));
+});
+ipcMain.handle("window:zoom-out", (event) => {
+  const wc = event.sender;
+  wc.setZoomLevel(Math.max(ZOOM_MIN, wc.zoomLevel - 0.5));
+});
+ipcMain.handle("window:zoom-reset", (event) => {
+  event.sender.setZoomLevel(0);
 });
 
 app.whenReady().then(() => {

@@ -9,6 +9,7 @@ import type {
   DaemonResult,
   Notification,
   PrGridRow,
+  TerminalLayout,
   TerminalSession,
 } from "../shared/types.js";
 
@@ -68,13 +69,28 @@ const api = {
   deleteTerminal: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("terminals:delete", id),
 
   listAgentAdapters: (): Promise<DaemonResult<AgentAdapter[]>> => ipcRenderer.invoke("agents:list"),
-  createAgentAdapter: (name: string, binary: string, yoloFlag: string | undefined): Promise<DaemonResult<AgentAdapter>> =>
-    ipcRenderer.invoke("agents:create", name, binary, yoloFlag),
+  createAgentAdapter: (
+    name: string,
+    binary: string,
+    yoloFlag: string | undefined,
+    mcpConfigFlag: string | undefined,
+  ): Promise<DaemonResult<AgentAdapter>> =>
+    ipcRenderer.invoke("agents:create", name, binary, yoloFlag, mcpConfigFlag),
   updateAgentAdapter: (
     id: number,
-    fields: Partial<{ name: string; binary: string; yoloFlag: string }>,
+    fields: Partial<{ name: string; binary: string; yoloFlag: string; mcpConfigFlag: string }>,
   ): Promise<DaemonResult<AgentAdapter>> => ipcRenderer.invoke("agents:update", id, fields),
   deleteAgentAdapter: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("agents:delete", id),
+
+  listLayouts: (campaignId: number): Promise<DaemonResult<TerminalLayout[]>> =>
+    ipcRenderer.invoke("layouts:list", campaignId),
+  createLayout: (campaignId: number, name: string, sessionIds: number[]): Promise<DaemonResult<TerminalLayout>> =>
+    ipcRenderer.invoke("layouts:create", campaignId, name, sessionIds),
+  updateLayout: (
+    id: number,
+    fields: Partial<{ name: string; sessionIds: number[] }>,
+  ): Promise<DaemonResult<TerminalLayout>> => ipcRenderer.invoke("layouts:update", id, fields),
+  deleteLayout: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("layouts:delete", id),
 
   // Live PTY streaming: openTerminalStream tells main to attach the WS to the
   // daemon (idempotent — safe to call again on remount); attachTerminal wires
@@ -90,6 +106,9 @@ const api = {
   toggleMaximizeWindow: (): Promise<void> => ipcRenderer.invoke("window:toggle-maximize"),
   closeWindow: (): Promise<void> => ipcRenderer.invoke("window:close"),
   isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke("window:is-maximized"),
+  zoomIn: (): Promise<void> => ipcRenderer.invoke("window:zoom-in"),
+  zoomOut: (): Promise<void> => ipcRenderer.invoke("window:zoom-out"),
+  zoomReset: (): Promise<void> => ipcRenderer.invoke("window:zoom-reset"),
   onWindowMaximizeChanged: (onChange: (maximized: boolean) => void): (() => void) => {
     const handler = (_event: unknown, maximized: boolean) => onChange(maximized);
     ipcRenderer.on("window:maximize-changed", handler);

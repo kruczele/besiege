@@ -15,7 +15,7 @@ import { TerminalsMain } from "./Terminals.js";
 const POLL_FAST = 3000;
 const POLL_GRID = 5000;
 
-type Tab = "status" | "campaigns" | "live" | "rules" | "agents" | "inbox";
+type Tab = "campaigns" | "live" | "rules" | "agents" | "inbox";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("campaigns");
@@ -25,6 +25,26 @@ export function App() {
   // notion of "current campaign" across the sidebar and the terminal area.
   const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
 
+  // No application menu (frame: false, no visible menu bar) supplies the
+  // conventional Ctrl/Cmd +/- zoom accelerators, so handle them here.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        window.api.zoomIn();
+      } else if (e.key === "-") {
+        e.preventDefault();
+        window.api.zoomOut();
+      } else if (e.key === "0") {
+        e.preventDefault();
+        window.api.zoomReset();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   return (
     <div className="app-frame">
       <TitleBar />
@@ -32,14 +52,13 @@ export function App() {
         <aside className="sidebar">
           <h1>Besiege</h1>
           <nav className="tabs">
-            {(["status", "campaigns", "live", "rules", "agents", "inbox"] as Tab[]).map((t) => (
+            {(["campaigns", "live", "rules", "agents", "inbox"] as Tab[]).map((t) => (
               <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
             ))}
           </nav>
           <div className="sidebar-content">
-            {tab === "status" && <StatusPanel />}
             {tab === "campaigns" && (
               <CampaignsPanel activeCampaignId={activeCampaignId} onSelectCampaign={setActiveCampaignId} />
             )}
@@ -47,6 +66,9 @@ export function App() {
             {tab === "rules" && <RulesPanel />}
             {tab === "agents" && <AgentsPanel />}
             {tab === "inbox" && <InboxPanel />}
+          </div>
+          <div className="sidebar-footer">
+            <StatusPanel />
           </div>
         </aside>
         <main className="main">
@@ -120,15 +142,9 @@ function StatusPanel() {
   if (!result.ok) return <p className="status status-down">Daemon unreachable — {result.error}</p>;
 
   return (
-    <div className="status status-up">
-      <p>
-        Daemon connected — pid {result.result.pid}, up {result.result.uptimeSeconds}s
-      </p>
-      <p>
-        Startups recorded: {result.result.db.startupCount}
-        {result.result.db.lastStartedAt && <> (last {result.result.db.lastStartedAt})</>}
-      </p>
-    </div>
+    <p className="status status-up" title={`Startups recorded: ${result.result.db.startupCount}`}>
+      Daemon connected — pid {result.result.pid}, up {result.result.uptimeSeconds}s
+    </p>
   );
 }
 
@@ -600,11 +616,13 @@ function AgentsPanel() {
   const [name, setName] = useState("");
   const [binary, setBinary] = useState("");
   const [yoloFlag, setYoloFlag] = useState("");
+  const [mcpConfigFlag, setMcpConfigFlag] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editBinary, setEditBinary] = useState("");
   const [editYoloFlag, setEditYoloFlag] = useState("");
+  const [editMcpConfigFlag, setEditMcpConfigFlag] = useState("");
 
   const reload = async () => {
     const res = await window.api.listAgentAdapters();
@@ -619,7 +637,7 @@ function AgentsPanel() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    const res = await window.api.createAgentAdapter(name, binary, yoloFlag || undefined);
+    const res = await window.api.createAgentAdapter(name, binary, yoloFlag || undefined, mcpConfigFlag || undefined);
     if (!res.ok) {
       setError(res.error);
       return;
@@ -627,6 +645,7 @@ function AgentsPanel() {
     setName("");
     setBinary("");
     setYoloFlag("");
+    setMcpConfigFlag("");
     reload();
   };
 
@@ -641,6 +660,7 @@ function AgentsPanel() {
     setEditName(adapter.name);
     setEditBinary(adapter.binary);
     setEditYoloFlag(adapter.yoloFlag ?? "");
+    setEditMcpConfigFlag(adapter.mcpConfigFlag ?? "");
   };
 
   const cancelEdit = () => setEditingId(null);
@@ -653,6 +673,7 @@ function AgentsPanel() {
       name: editName,
       binary: editBinary,
       yoloFlag: editYoloFlag,
+      mcpConfigFlag: editMcpConfigFlag,
     });
     if (!res.ok) {
       setError(res.error);
@@ -671,6 +692,11 @@ function AgentsPanel() {
           placeholder="yolo flag (optional, e.g. --dangerously-skip-permissions)"
           value={yoloFlag}
           onChange={(e) => setYoloFlag(e.target.value)}
+        />
+        <input
+          placeholder="mcp config flag (optional, e.g. --mcp-config {path})"
+          value={mcpConfigFlag}
+          onChange={(e) => setMcpConfigFlag(e.target.value)}
         />
         <button type="submit">Add agent</button>
       </form>
@@ -707,6 +733,12 @@ function AgentsPanel() {
                   value={editYoloFlag}
                   onChange={(e) => setEditYoloFlag(e.target.value)}
                 />
+                <input
+                  className="rule-edit-pattern"
+                  placeholder="mcp config flag (optional)"
+                  value={editMcpConfigFlag}
+                  onChange={(e) => setEditMcpConfigFlag(e.target.value)}
+                />
               </form>
             </li>
           ) : (
@@ -721,6 +753,7 @@ function AgentsPanel() {
               <span className="rule-item-context">
                 {adapter.binary}
                 {adapter.yoloFlag ? ` · ${adapter.yoloFlag}` : ""}
+                {adapter.mcpConfigFlag ? ` · ${adapter.mcpConfigFlag}` : ""}
               </span>
             </li>
           ),

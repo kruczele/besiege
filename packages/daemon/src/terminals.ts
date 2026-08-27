@@ -2,8 +2,11 @@ import * as pty from "@lydell/node-pty";
 import type { IPty } from "@lydell/node-pty";
 import type Database from "better-sqlite3";
 import type { WebSocket } from "ws";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { stateDir } from "./paths.js";
 
 // Ring buffer cap: last ~200KB of output per session. A chatty long-lived
 // session (tail -f, a build loop) must not grow the daemon's memory forever.
@@ -29,7 +32,33 @@ interface AgentAdapterRow {
   name: string;
   binary: string;
   yolo_flag: string | null;
+  mcp_config_flag: string | null;
   created_at: string;
+}
+
+// Shared across every session — the besiege MCP server is a single stdio
+// process description (not session-specific), so one config file on disk is
+// enough; agents just point at it via their own --mcp-config-style flag.
+const MCP_CONFIG_PATH = join(stateDir, "mcp-config.json");
+
+function ensureMcpConfig(): string {
+  if (!existsSync(MCP_CONFIG_PATH)) {
+    mkdirSync(stateDir, { recursive: true });
+    const mcpEntryPoint = join(dirname(fileURLToPath(import.meta.url)), "mcp.js");
+    writeFileSync(
+      MCP_CONFIG_PATH,
+      JSON.stringify(
+        {
+          mcpServers: {
+            besiege: { command: process.execPath, args: [mcpEntryPoint] },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+  }
+  return MCP_CONFIG_PATH;
 }
 
 // Quoted-segment aware tokenizer for the free-text "extra args" field, so
@@ -96,8 +125,11 @@ export function spawnSession(
     : undefined;
 
   const command = adapter?.binary ?? "zsh";
+  const mcpArgs = adapter?.mcp_config_flag
+    ? splitArgs(adapter.mcp_config_flag).map((token) => token.replace("{path}", ensureMcpConfig()))
+    : [];
   const argv = adapter
-    ? [...(yolo && adapter.yolo_flag ? [adapter.yolo_flag] : []), ...(extraArgs ? splitArgs(extraArgs) : [])]
+    ? [...mcpArgs, ...(yolo && adapter.yolo_flag ? [adapter.yolo_flag] : []), ...(extraArgs ? splitArgs(extraArgs) : [])]
     : [];
 
   const proc = pty.spawn(command, argv, { cols: 80, rows: 24, cwd, env: process.env });

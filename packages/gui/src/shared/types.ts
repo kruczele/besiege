@@ -59,7 +59,16 @@ export interface AgentAdapter {
   name: string;
   binary: string;
   yoloFlag: string | null;
+  mcpConfigFlag: string | null;
   createdAt: string;
+}
+
+export interface TerminalLayout {
+  id: number;
+  campaignId: number;
+  name: string;
+  createdAt: string;
+  sessionIds: number[];
 }
 
 export interface CampaignStep {

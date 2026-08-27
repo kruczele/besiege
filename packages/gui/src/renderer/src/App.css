@@ -605,3 +605,133 @@ h1 {
   overflow: hidden;
   padding: 0.5rem;
 }
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid #2a2e38;
+  font-size: 0.78rem;
+}
+
+.sidebar-footer .status {
+  margin: 0;
+}
+
+.layout-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: #14161c;
+  border-bottom: 1px solid #2a2e38;
+  overflow-x: auto;
+}
+
+.layout-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  color: #9ba1b0;
+  background: #1b1e27;
+  cursor: pointer;
+  white-space: nowrap;
+  border: none;
+}
+
+.layout-tab.selected {
+  background: #2a3352;
+  color: #e7e8ed;
+}
+
+.layout-tab button {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 0 0.15rem;
+  font-size: 0.85rem;
+}
+
+.layout-tab button:hover {
+  opacity: 1;
+}
+
+.layout-tab-new {
+  background: none;
+  border: 1px dashed #3a3f50;
+  border-radius: 999px;
+  color: #9ba1b0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.layout-tab-new:hover {
+  color: #e7e8ed;
+  border-color: #6c86ff;
+}
+
+.layout-form {
+  margin: 0.75rem;
+}
+
+.layout-form-sessions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.layout-form-session {
+  font-size: 0.8rem;
+}
+
+.layout-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.terminal-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  grid-auto-rows: 1fr;
+}
+
+.terminal-grid-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid #2a2e38;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.terminal-grid-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  background: #1b1e27;
+  border-bottom: 1px solid #2a2e38;
+  font-size: 0.75rem;
+  color: #9ba1b0;
+}
+
+.terminal-grid-pane-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-grid-pane .terminal-viewport {
+  padding: 0.25rem;
+}
