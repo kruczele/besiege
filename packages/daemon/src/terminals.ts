@@ -2,6 +2,8 @@ import * as pty from "@lydell/node-pty";
 import type { IPty } from "@lydell/node-pty";
 import type Database from "better-sqlite3";
 import type { WebSocket } from "ws";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // Ring buffer cap: last ~200KB of output per session. A chatty long-lived
 // session (tail -f, a build loop) must not grow the daemon's memory forever.
@@ -43,6 +45,16 @@ function splitArgs(input: string): string[] {
   return args;
 }
 
+// A cwd typed by hand (campaign default_dir, terminal cwd override) commonly
+// starts with "~" the way a shell prompt would accept — but pty.spawn's cwd
+// option is a raw chdir(), no shell in between to expand it, so a literal
+// "~/..." silently fails to chdir and the process exits immediately.
+function expandHome(cwd: string): string {
+  if (cwd === "~") return homedir();
+  if (cwd.startsWith("~/")) return join(homedir(), cwd.slice(2));
+  return cwd;
+}
+
 interface LiveSession {
   id: number;
   pty: IPty;
@@ -75,6 +87,8 @@ export function spawnSession(
   yolo?: boolean,
   extraArgs?: string,
 ): TerminalSessionRow {
+  cwd = expandHome(cwd);
+
   const adapter = agentAdapterId
     ? (db.prepare("SELECT * FROM agent_adapters WHERE id = ?").get(agentAdapterId) as
         | AgentAdapterRow
