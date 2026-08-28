@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Copy, Minus, Square, X } from "lucide-react";
 import type {
   ActiveClaim,
   AgentAdapter,
@@ -9,6 +10,7 @@ import type {
   DaemonResult,
   Notification,
   PrGridRow,
+  TaskDefinition,
 } from "../../shared/types.js";
 import { TerminalsMain } from "./Terminals.js";
 
@@ -98,21 +100,21 @@ function TitleBar() {
           aria-label="Minimize"
           onClick={() => window.api.minimizeWindow()}
         >
-          &#x2013;
+          <Minus size={14} />
         </button>
         <button
           className="title-bar-btn"
           aria-label={maximized ? "Restore" : "Maximize"}
           onClick={() => window.api.toggleMaximizeWindow()}
         >
-          {maximized ? "❐" : "❑"}
+          {maximized ? <Copy size={13} /> : <Square size={12} />}
         </button>
         <button
           className="title-bar-btn title-bar-btn-close"
           aria-label="Close"
           onClick={() => window.api.closeWindow()}
         >
-          &#x2715;
+          <X size={14} />
         </button>
       </div>
     </div>
@@ -391,6 +393,109 @@ function CampaignsPanel({
           </table>
         </div>
       )}
+
+      {selectedId !== null && <TasksPanel campaignId={selectedId} steps={steps} />}
+    </div>
+  );
+}
+
+// Human-authored task definitions per step — instructions applied to every PR
+// in that step (agents can also self-serve this via the create_task MCP
+// tool; this is the same underlying route, just from the GUI side).
+function TasksPanel({ campaignId, steps }: { campaignId: number; steps: CampaignStep[] }) {
+  const [selectedStepId, setSelectedStepId] = useState<number | null>(null);
+  const [tasks, setTasks] = useState<TaskDefinition[]>([]);
+  const [name, setName] = useState("");
+  const [context, setContext] = useState("");
+  const [since, setSince] = useState(() => new Date().toISOString().slice(0, 10));
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedStepId((cur) => (cur !== null && steps.some((s) => s.id === cur) ? cur : (steps[0]?.id ?? null)));
+  }, [steps]);
+
+  const reload = async (stepId: number) => {
+    const res = await window.api.listTasks(campaignId, stepId);
+    if (res.ok) setTasks(res.result);
+  };
+
+  useEffect(() => {
+    if (selectedStepId !== null) reload(selectedStepId);
+    else setTasks([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId, selectedStepId]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedStepId === null) return;
+    setError(null);
+    const res = await window.api.createTask(campaignId, selectedStepId, name, context, new Date(since).toISOString());
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setName("");
+    setContext("");
+    reload(selectedStepId);
+  };
+
+  const retire = async (taskId: number) => {
+    if (selectedStepId === null) return;
+    await window.api.retireTask(campaignId, selectedStepId, taskId);
+    reload(selectedStepId);
+  };
+
+  if (steps.length === 0) return null;
+
+  return (
+    <div className="tasks-panel">
+      <h2>Tasks</h2>
+      <div className="campaign-picker">
+        {steps.map((s) => (
+          <button
+            key={s.id}
+            className={`campaign-picker-btn ${selectedStepId === s.id ? "selected" : ""}`}
+            onClick={() => setSelectedStepId(s.id)}
+          >
+            {s.name}
+          </button>
+        ))}
+      </div>
+
+      {error && <p className="status status-down">{error}</p>}
+
+      <ul className="rule-list">
+        {tasks.length === 0 && <span className="empty-hint">No tasks for this step yet.</span>}
+        {tasks.map((t) => (
+          <li key={t.id} className="rule-item">
+            <div className="rule-item-row">
+              <code>{t.name}</code>
+              <div className="rule-item-actions">
+                <button onClick={() => retire(t.id)}>Retire</button>
+              </div>
+            </div>
+            <span className="rule-item-context">{t.context}</span>
+          </li>
+        ))}
+      </ul>
+
+      <form className="rule-form" onSubmit={submit}>
+        <input placeholder="task name" value={name} onChange={(e) => setName(e.target.value)} />
+        <textarea
+          placeholder="instructions to apply to every PR in this step"
+          value={context}
+          onChange={(e) => setContext(e.target.value)}
+        />
+        <input
+          type="date"
+          value={since}
+          onChange={(e) => setSince(e.target.value)}
+          title="Existing PRs in this step created before this date get the task added retroactively"
+        />
+        <button type="submit" disabled={!name.trim() || !context.trim()}>
+          Add task
+        </button>
+      </form>
     </div>
   );
 }
@@ -440,6 +545,14 @@ function LivePanel() {
     if (res.ok) setNotifications(res.result);
   };
 
+  const release = async (prId: number) => {
+    await window.api.releaseClaim(prId);
+    if (selectedId !== null) {
+      const res = await window.api.listCampaignClaims(selectedId);
+      if (res.ok) setClaims(res.result);
+    }
+  };
+
   return (
     <div className="panel">
       {campaigns.length > 1 && (
@@ -461,8 +574,11 @@ function LivePanel() {
                     {c.stepName} · {c.lifecycle}
                   </div>
                   {c.note && <div className="c-note">{c.note}</div>}
-                  <div className="c-agent">
-                    {c.agentId} · {elapsed(c.claimedAt)} ago
+                  <div className="c-agent-row">
+                    <div className="c-agent">
+                      {c.agentId} · {elapsed(c.claimedAt)} ago
+                    </div>
+                    <button onClick={() => release(c.prId)}>Release</button>
                   </div>
                 </li>
               ))}

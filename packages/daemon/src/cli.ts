@@ -171,6 +171,7 @@ async function dispatch(opts: {
       BESIEGE_STEP_ID: stepId,
       BESIEGE_PR_ID: String(pr.id),
       BESIEGE_REPO: repo,
+      BESIEGE_SESSION_ID: sessionId,
     },
   });
 
