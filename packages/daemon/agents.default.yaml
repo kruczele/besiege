@@ -1,0 +1,21 @@
+# Default agent adapter definitions, shipped with Besiege. Edit
+# agents.local.yaml (gitignored, alongside this file) instead of this one —
+# it's joined on top of these by name, so a custom entry with the same name
+# overrides the default entirely, and any other name is just added.
+#
+# Fields: name (required), binary (required), yoloFlag, mcpConfigFlag,
+# sessionIdFlag, resumeFlag (all optional). mcpConfigFlag/sessionIdFlag/
+# resumeFlag are argv templates — {path} and {sessionId} get substituted at
+# launch time.
+- name: Claude
+  binary: claude
+  yoloFlag: --dangerously-skip-permissions
+  mcpConfigFlag: "--mcp-config {path}"
+  sessionIdFlag: "--session-id {sessionId}"
+  resumeFlag: "--resume {sessionId}"
+- name: OpenCode
+  binary: opencode
+  yoloFlag: --auto
+- name: Antigravity (agy)
+  binary: agy
+  yoloFlag: --dangerously-skip-permissions

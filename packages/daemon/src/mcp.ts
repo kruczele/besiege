@@ -54,12 +54,19 @@ interface Pr {
   id: number;
 }
 
+// Repos register themselves into the campaign the first time a PR touches
+// them — requiring a human to pre-register every repo before an agent can
+// report a PR defeats the point of a campaign spanning however many repos
+// turn out to need one, especially at the "hundreds of repos" end.
 async function resolveRepoId(campaign: string, repo: string): Promise<number> {
   const repos = await getJson<CampaignRepo[]>(
     `/campaigns/${encodeURIComponent(campaign)}/repos?name=${encodeURIComponent(repo)}`,
   );
-  if (repos.length === 0) throw new Error(`repo '${repo}' is not registered in campaign ${campaign}`);
-  return repos[0].id;
+  if (repos.length > 0) return repos[0].id;
+  const created = await postJson<CampaignRepo>(`/campaigns/${encodeURIComponent(campaign)}/repos`, {
+    github_full_name: repo,
+  });
+  return created.id;
 }
 
 async function resolveStepId(campaign: string, step: string): Promise<number> {

@@ -1,6 +1,36 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Brand identity: siege orange / charcoal / warm white. Everything else
+     in this file is opacity of warm white over a charcoal surface, not a
+     separate color — see the token names below. Status colors (success/
+     danger/warning) and the PR-lifecycle badge hues are the one deliberate
+     exception: they're a semantic multi-hue coding system for scanning a
+     grid of PRs at a glance, which monochrome+orange can't do, so they stay
+     as their own distinct colors rather than folding into this scale. */
+  --color-orange: #e86432;
+  --color-charcoal: #151719;
+  --color-warm-white: #f2efe8;
+
+  --bg: var(--color-charcoal);
+  --surface: #1c1f21;
+  --surface-hover: rgba(242, 239, 232, 0.06);
+  --surface-active: rgba(242, 239, 232, 0.1);
+  --surface-active-hover: rgba(242, 239, 232, 0.16);
+
+  --text: var(--color-warm-white);
+  --text-secondary: rgba(242, 239, 232, 0.6);
+  --text-disabled: rgba(242, 239, 232, 0.3);
+  --border: rgba(242, 239, 232, 0.1);
+
+  --accent: var(--color-orange);
+  --accent-soft: rgba(232, 100, 50, 0.18);
+  --on-accent: var(--color-charcoal);
+
+  --success: #35b37e;
+  --danger: #e5645a;
+  --warning: #fb923c;
 }
 
 html, body, #root {
@@ -9,8 +39,30 @@ html, body, #root {
 }
 
 body {
-  background: #14161c;
-  color: #e7e8ed;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Scrollbars everywhere in the app (Chromium/Electron only — no standard
+   fallback exists, but that's the only engine this app ever runs on). */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--surface-active-hover);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(242, 239, 232, 0.28);
 }
 
 .app-frame {
@@ -26,8 +78,8 @@ body {
   justify-content: space-between;
   height: 2.25rem;
   padding-left: 0.9rem;
-  background: #14161c;
-  border-bottom: 1px solid #2a2e38;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -35,7 +87,7 @@ body {
 .title-bar-label {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   letter-spacing: 0.02em;
 }
 
@@ -53,20 +105,20 @@ body {
   height: 100%;
   background: none;
   border: none;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
 }
 
 .title-bar-btn:hover {
-  background: #2a2e38;
-  color: #e7e8ed;
+  background: var(--surface-active);
+  color: var(--text);
 }
 
 .title-bar-btn-close:hover {
-  background: #e5645a;
-  color: #14161c;
+  background: var(--danger);
+  color: var(--bg);
 }
 
 .shell {
@@ -82,7 +134,7 @@ body {
   flex-direction: column;
   min-height: 0;
   padding: 1.25rem 1.5rem;
-  border-right: 1px solid #2a2e38;
+  border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
@@ -111,14 +163,14 @@ h1 {
 .tabs {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 1.25rem;
-  border-bottom: 1px solid #2a2e38;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .tabs button {
   background: none;
   border: none;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   padding: 0.5rem 0.1rem;
   margin-right: 1rem;
   font-size: 0.9rem;
@@ -127,8 +179,15 @@ h1 {
 }
 
 .tabs button.active {
-  color: #e7e8ed;
-  border-bottom-color: #6c86ff;
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.tab-helptext {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0 0 1.25rem;
 }
 
 .panel {
@@ -145,10 +204,10 @@ h1 {
 
 .rule-form input,
 .rule-form textarea {
-  background: #1b1e27;
-  border: 1px solid #2a2e38;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: #e7e8ed;
+  color: var(--text);
   padding: 0.5rem 0.6rem;
   font-family: inherit;
   font-size: 0.85rem;
@@ -163,10 +222,10 @@ h1 {
 .rule-list button,
 .notification-list button {
   align-self: flex-start;
-  background: #6c86ff;
+  background: var(--accent);
   border: none;
   border-radius: 4px;
-  color: #14161c;
+  color: var(--on-accent);
   padding: 0.4rem 0.8rem;
   font-size: 0.82rem;
   font-weight: 600;
@@ -187,8 +246,8 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  background: #1b1e27;
-  border: 1px solid #2a2e38;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
   font-size: 0.85rem;
@@ -209,18 +268,18 @@ h1 {
 
 .rule-item-actions button {
   align-self: auto;
-  background: #2a2e38;
-  color: #e7e8ed;
+  background: var(--surface-active);
+  color: var(--text);
   padding: 0.3rem 0.65rem;
   font-size: 0.78rem;
 }
 
 .rule-item-actions button:hover {
-  background: #3a3f50;
+  background: var(--surface-active-hover);
 }
 
 .rule-item-context {
-  color: #9ba1b0;
+  color: var(--text-secondary);
   white-space: pre-wrap;
 }
 
@@ -233,20 +292,20 @@ h1 {
 .rule-edit-pattern {
   flex: 1;
   min-width: 0;
-  background: #14161c;
-  border: 1px solid #2a2e38;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: #6c86ff;
+  color: var(--accent);
   padding: 0.35rem 0.5rem;
   font-family: inherit;
   font-size: 0.85rem;
 }
 
 .rule-edit-context {
-  background: #14161c;
-  border: 1px solid #2a2e38;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: #e7e8ed;
+  color: var(--text);
   padding: 0.4rem 0.5rem;
   font-family: inherit;
   font-size: 0.82rem;
@@ -255,21 +314,31 @@ h1 {
 }
 
 .rule-list code {
-  color: #6c86ff;
+  color: var(--accent);
 }
 
 .notification-card {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  background: #1b1e27;
-  border: 1px solid #2a2e38;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
 }
 
 .notification-card.acked {
   opacity: 0.5;
+}
+
+.notification-card.clickable,
+.claim-card.clickable {
+  cursor: pointer;
+}
+
+.notification-card.clickable:hover,
+.claim-card.clickable:hover {
+  border-color: var(--accent);
 }
 
 .n-message {
@@ -287,7 +356,7 @@ h1 {
 
 .n-meta {
   font-size: 0.72rem;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -310,7 +379,7 @@ h1 {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.85rem;
-  color: #9ba1b0;
+  color: var(--text-secondary);
 }
 
 .status {
@@ -319,15 +388,15 @@ h1 {
 }
 
 .status-pending {
-  color: #9ba1b0;
+  color: var(--text-secondary);
 }
 
 .status-down {
-  color: #e5645a;
+  color: var(--danger);
 }
 
 .status-up {
-  color: #35b37e;
+  color: var(--success);
 }
 
 /* ── Campaign grid ── */
@@ -347,36 +416,36 @@ h1 {
 }
 
 .campaign-picker-btn {
-  background: #1b1e27;
+  background: var(--surface);
   border: none;
   border-radius: 999px;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   padding: 0.3rem 0.7rem;
   font-size: 0.82rem;
   cursor: pointer;
 }
 
 .campaign-picker-btn:hover {
-  color: #e7e8ed;
+  color: var(--text);
 }
 
 .campaign-picker-btn.selected {
-  background: #2a3352;
-  color: #e7e8ed;
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .campaign-toolbar button {
-  background: #2a2e38;
+  background: var(--surface-active);
   border: none;
   border-radius: 4px;
-  color: #e7e8ed;
+  color: var(--text);
   padding: 0.35rem 0.75rem;
   font-size: 0.82rem;
   cursor: pointer;
 }
 
 .campaign-toolbar button:hover {
-  background: #3a3f50;
+  background: var(--surface-active-hover);
 }
 
 .campaign-grid-wrap {
@@ -386,12 +455,12 @@ h1 {
 .tasks-panel {
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid #2a2e38;
+  border-top: 1px solid var(--border);
 }
 
 .tasks-panel h2 {
   font-size: 0.9rem;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   font-weight: 600;
   margin: 0 0 0.75rem;
   text-transform: uppercase;
@@ -417,26 +486,26 @@ h1 {
 }
 
 .campaign-grid th {
-  background: #1b1e27;
-  color: #9ba1b0;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-weight: 600;
   padding: 0.45rem 0.75rem;
   text-align: left;
-  border: 1px solid #2a2e38;
+  border: 1px solid var(--border);
   white-space: nowrap;
 }
 
 .campaign-grid td {
-  border: 1px solid #2a2e38;
+  border: 1px solid var(--border);
   padding: 0.35rem 0.6rem;
   vertical-align: top;
 }
 
 .campaign-grid td.repo-name {
-  color: #9ba1b0;
+  color: var(--text-secondary);
   font-size: 0.78rem;
   white-space: nowrap;
-  background: #1b1e27;
+  background: var(--surface);
 }
 
 .pr-cell {
@@ -446,7 +515,9 @@ h1 {
   min-width: 7rem;
 }
 
-/* lifecycle badges */
+/* lifecycle badges — a deliberately separate, distinct-hue-per-status
+   system (not the brand triad) so a grid of many PRs stays scannable at a
+   glance; see the :root comment above. */
 .lc {
   display: inline-block;
   border-radius: 3px;
@@ -462,33 +533,12 @@ h1 {
 .lc-closed       { background: #1f1f24; color: #6b7280; }
 .lc-changes-requested { background: #422006; color: #fb923c; }
 
-.ci-failing { border-left: 3px solid #e5645a; }
-.ci-passing { border-left: 3px solid #35b37e; }
+.ci-failing { border-left: 3px solid var(--danger); }
+.ci-passing { border-left: 3px solid var(--success); }
 
 .pending-badge {
   font-size: 0.68rem;
-  color: #fb923c;
-}
-
-/* ── Live board ── */
-
-.live-board {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
-}
-
-@media (max-width: 700px) {
-  .live-board { grid-template-columns: 1fr; }
-}
-
-.live-section h2 {
-  font-size: 0.9rem;
-  color: #9ba1b0;
-  font-weight: 600;
-  margin: 0 0 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  color: var(--warning);
 }
 
 .claim-list {
@@ -501,8 +551,8 @@ h1 {
 }
 
 .claim-card {
-  background: #1b1e27;
-  border: 1px solid #2a2e38;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
 }
@@ -515,18 +565,18 @@ h1 {
 
 .claim-card .c-step {
   font-size: 0.75rem;
-  color: #9ba1b0;
+  color: var(--text-secondary);
 }
 
 .claim-card .c-note {
   font-size: 0.8rem;
-  color: #e7e8ed;
+  color: var(--text);
   margin: 0.25rem 0 0;
 }
 
 .claim-card .c-agent {
   font-size: 0.72rem;
-  color: #6b7280;
+  color: var(--text-disabled);
 }
 
 .c-agent-row {
@@ -538,10 +588,10 @@ h1 {
 }
 
 .c-agent-row button {
-  background: #2a2e38;
+  background: var(--surface-active);
   border: none;
   border-radius: 4px;
-  color: #e7e8ed;
+  color: var(--text);
   padding: 0.15rem 0.5rem;
   font-size: 0.7rem;
   cursor: pointer;
@@ -549,11 +599,11 @@ h1 {
 }
 
 .c-agent-row button:hover {
-  background: #3a3f50;
+  background: var(--surface-active-hover);
 }
 
 .empty-hint {
-  color: #6b7280;
+  color: var(--text-disabled);
   font-size: 0.85rem;
 }
 
@@ -585,12 +635,12 @@ h1 {
   overflow-y: auto;
   padding-top: 0.75rem;
   margin-top: 0.75rem;
-  border-top: 1px solid #2a2e38;
+  border-top: 1px solid var(--border);
 }
 
 .inbox-section h2 {
   font-size: 0.78rem;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   font-weight: 600;
   margin: 0 0 0.5rem;
   text-transform: uppercase;
@@ -601,7 +651,7 @@ h1 {
   flex-shrink: 0;
   padding-top: 0.75rem;
   margin-top: 0.75rem;
-  border-top: 1px solid #2a2e38;
+  border-top: 1px solid var(--border);
   font-size: 0.78rem;
 }
 
@@ -614,8 +664,8 @@ h1 {
   align-items: center;
   gap: 0.4rem;
   padding: 0.5rem 0.75rem;
-  background: #14161c;
-  border-bottom: 1px solid #2a2e38;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   overflow-x: auto;
 }
 
@@ -626,16 +676,16 @@ h1 {
   padding: 0.3rem 0.6rem;
   border-radius: 999px;
   font-size: 0.78rem;
-  color: #9ba1b0;
-  background: #1b1e27;
+  color: var(--text-secondary);
+  background: var(--surface);
   cursor: pointer;
   white-space: nowrap;
   border: none;
 }
 
 .layout-tab.selected {
-  background: #2a3352;
-  color: #e7e8ed;
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .layout-tab button {
@@ -661,24 +711,24 @@ h1 {
   align-items: center;
   gap: 0.3rem;
   background: none;
-  border: 1px dashed #3a3f50;
+  border: 1px dashed var(--border);
   border-radius: 999px;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   padding: 0.3rem 0.6rem;
   font-size: 0.78rem;
   cursor: pointer;
 }
 
 .layout-tab-new:hover {
-  color: #e7e8ed;
-  border-color: #6c86ff;
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .layout-tab-rename {
-  background: #14161c;
-  border: 1px solid #6c86ff;
+  background: var(--bg);
+  border: 1px solid var(--accent);
   border-radius: 4px;
-  color: #e7e8ed;
+  color: var(--text);
   padding: 0.15rem 0.35rem;
   font-family: inherit;
   font-size: 0.78rem;
@@ -735,7 +785,7 @@ h1 {
 .pane-divider::after {
   content: "";
   position: absolute;
-  background: #2a2e38;
+  background: var(--border);
 }
 
 .pane-split-row > .pane-divider {
@@ -765,7 +815,7 @@ h1 {
 }
 
 .pane-divider:hover::after {
-  background: #6c86ff;
+  background: var(--accent);
 }
 
 .terminal-grid-pane {
@@ -773,13 +823,13 @@ h1 {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  border: 1px solid #2a2e38;
+  border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
 
 .terminal-grid-pane.active {
-  border-color: #6c86ff;
+  border-color: var(--accent);
 }
 
 .terminal-grid-pane-header {
@@ -788,10 +838,10 @@ h1 {
   justify-content: space-between;
   gap: 0.4rem;
   padding: 0.3rem 0.5rem;
-  background: #1b1e27;
-  border-bottom: 1px solid #2a2e38;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   font-size: 0.75rem;
-  color: #9ba1b0;
+  color: var(--text-secondary);
 }
 
 .terminal-grid-pane-title {
@@ -801,7 +851,7 @@ h1 {
 }
 
 .terminal-grid-pane-title.exited {
-  color: #6b7280;
+  color: var(--text-disabled);
 }
 
 .terminal-grid-pane-actions {
@@ -843,6 +893,33 @@ h1 {
   padding: 1rem;
 }
 
+.pane-launcher-resume {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.25rem;
+}
+
+.pane-launcher-resume-btn {
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  color: var(--on-accent);
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pane-launcher-resume-btn:hover {
+  filter: brightness(1.1);
+}
+
+.pane-launcher-resume-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
 .pane-launcher-options {
   display: flex;
   align-items: center;
@@ -850,10 +927,10 @@ h1 {
 }
 
 .pane-launcher-args {
-  background: #1b1e27;
-  border: 1px solid #2a2e38;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: #e7e8ed;
+  color: var(--text);
   padding: 0.3rem 0.5rem;
   font-family: inherit;
   font-size: 0.78rem;
@@ -861,10 +938,10 @@ h1 {
 }
 
 .pane-launcher-yolo {
-  background: #1b1e27;
-  border: 1px solid #2a2e38;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: #9ba1b0;
+  color: var(--text-secondary);
   padding: 0.3rem 0.6rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -873,8 +950,8 @@ h1 {
 
 .pane-launcher-yolo.active {
   background: #422006;
-  border-color: #fb923c;
-  color: #fb923c;
+  border-color: var(--warning);
+  color: var(--warning);
 }
 
 .pane-launcher-buttons {
@@ -885,15 +962,15 @@ h1 {
 }
 
 .pane-launcher-buttons button {
-  background: #2a2e38;
+  background: var(--surface-active);
   border: none;
   border-radius: 4px;
-  color: #e7e8ed;
+  color: var(--text);
   padding: 0.4rem 0.9rem;
   font-size: 0.82rem;
   cursor: pointer;
 }
 
 .pane-launcher-buttons button:hover {
-  background: #3a3f50;
+  background: var(--surface-active-hover);
 }

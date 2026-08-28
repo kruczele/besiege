@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
 import type {
   ActiveClaim,
-  AgentAdapter,
   Campaign,
   CampaignStep,
   ConfigRule,
@@ -18,7 +17,16 @@ import { TerminalsMain } from "./Terminals.js";
 const POLL_FAST = 3000;
 const POLL_GRID = 5000;
 
-type Tab = "campaigns" | "live" | "rules" | "agents";
+type Tab = "campaigns" | "live" | "rules";
+
+// Display labels only — internal tab/component names are unchanged so this
+// is a pure cosmetic rename, not a functional split.
+const TAB_LABEL: Record<Tab, string> = { campaigns: "Campaigns", live: "Army", rules: "Edicts" };
+const TAB_HELPTEXT: Record<Tab, string> = {
+  campaigns: "Coordinate multi-repo initiatives and track their progress from start to finish.",
+  live: "See your agents, what they're working on, and where they need you.",
+  rules: "Define standing rules and context that guide your agents.",
+};
 
 export function App() {
   const [tab, setTab] = useState<Tab>("campaigns");
@@ -27,7 +35,7 @@ export function App() {
   // belongs to. Terminals are children of campaigns, so there's one shared
   // notion of "current campaign" across the sidebar and the terminal area.
   const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
-  // Set by "Jump to agent" (Inbox, Live tab) — see TerminalsMain's
+  // Set by "Jump to agent" (Inbox, Army tab) — see TerminalsMain's
   // focusRequest prop for how the terminal area resolves this into an
   // actual tab/pane selection once that campaign's grid has loaded.
   const [focusRequest, setFocusRequest] = useState<{ campaignId: number; terminalId: number } | null>(null);
@@ -35,6 +43,10 @@ export function App() {
     setActiveCampaignId(campaignId);
     setFocusRequest({ campaignId, terminalId });
   };
+  // Lifted up from TerminalsMain so the Army tab can show a session's live
+  // title too, not just whichever pane happens to be mounted.
+  const [titles, setTitles] = useState<Record<number, string>>({});
+  const onTitleChange = (id: number, title: string) => setTitles((prev) => ({ ...prev, [id]: title }));
 
   // No application menu (frame: false, no visible menu bar) supplies the
   // conventional Ctrl/Cmd +/- zoom accelerators, so handle them here.
@@ -63,21 +75,21 @@ export function App() {
         <aside className="sidebar">
           <h1>Besiege</h1>
           <nav className="tabs">
-            {(["campaigns", "live", "rules", "agents"] as Tab[]).map((t) => (
+            {(["campaigns", "live", "rules"] as Tab[]).map((t) => (
               <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+                {TAB_LABEL[t]}
               </button>
             ))}
           </nav>
+          <p className="tab-helptext">{TAB_HELPTEXT[tab]}</p>
           <div className="sidebar-content">
             {tab === "campaigns" && (
               <CampaignsPanel activeCampaignId={activeCampaignId} onSelectCampaign={setActiveCampaignId} />
             )}
-            {tab === "live" && <LivePanel onJump={jumpToSession} />}
+            {tab === "live" && <LivePanel onJump={jumpToSession} titles={titles} />}
             {tab === "rules" && <RulesPanel />}
-            {tab === "agents" && <AgentsPanel />}
           </div>
-          <InboxPanel onJump={jumpToSession} />
+          <InboxPanel onJump={jumpToSession} titles={titles} />
           <div className="sidebar-footer">
             <StatusPanel />
           </div>
@@ -87,6 +99,8 @@ export function App() {
             campaignId={activeCampaignId}
             focusRequest={focusRequest}
             onFocusHandled={() => setFocusRequest(null)}
+            titles={titles}
+            onTitleChange={onTitleChange}
           />
         </main>
       </div>
@@ -540,30 +554,45 @@ function useSessionLookup(sessionIds: string[]): Record<string, TerminalSession 
 
 // Message and meta/actions are deliberately separate rows — cramming a
 // multi-line message next to a button in one flex row is what made this
-// unreadable before.
+// unreadable before. The whole tile is clickable (not just a small link)
+// when it resolves to a session, per feedback that a tiny button was easy
+// to miss.
 function NotificationCard({
   notification,
   session,
+  titles,
   onAck,
   onJump,
 }: {
   notification: Notification;
   session: TerminalSession | null | undefined;
+  titles: Record<number, string>;
   onAck: (id: number) => void;
   onJump: (campaignId: number, terminalId: number) => void;
 }) {
-  const title = session ? (session.label ?? session.agentName ?? `Terminal #${session.id}`) : null;
+  const title = session ? (titles[session.id] ?? session.label ?? session.agentAdapterName ?? `Terminal #${session.id}`) : null;
 
   return (
-    <li className={`notification-card ${notification.acknowledgedAt ? "acked" : ""}`}>
+    <li
+      className={`notification-card ${notification.acknowledgedAt ? "acked" : ""} ${session ? "clickable" : ""}`}
+      onClick={session ? () => onJump(session.campaignId, session.id) : undefined}
+    >
       <p className="n-message">{notification.message}</p>
       <div className="n-meta-row">
         <span className="n-meta">
           {title ?? notification.cwd ?? "unknown session"} · {elapsed(notification.createdAt)} ago
         </span>
         <div className="n-actions">
-          {session && <button onClick={() => onJump(session.campaignId, session.id)}>Jump to agent</button>}
-          {!notification.acknowledgedAt && <button onClick={() => onAck(notification.id)}>Acknowledge</button>}
+          {!notification.acknowledgedAt && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAck(notification.id);
+              }}
+            >
+              Acknowledge
+            </button>
+          )}
         </div>
       </div>
     </li>
@@ -572,12 +601,20 @@ function NotificationCard({
 
 // ── Live board ────────────────────────────────────────────────────────────────
 
-function LivePanel({ onJump }: { onJump: (campaignId: number, terminalId: number) => void }) {
+// The "Army" tab — active agents only. Notifications used to be duplicated
+// here as "Waiting on you", but the always-visible Inbox covers that
+// completely now, so this is just the one list.
+function LivePanel({
+  onJump,
+  titles,
+}: {
+  onJump: (campaignId: number, terminalId: number) => void;
+  titles: Record<number, string>;
+}) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [claims, setClaims] = useState<ActiveClaim[]>([]);
   const [runningAgents, setRunningAgents] = useState<TerminalSession[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
     window.api.listCampaigns().then((res) => {
@@ -593,19 +630,17 @@ function LivePanel({ onJump }: { onJump: (campaignId: number, terminalId: number
     let cancelled = false;
 
     const poll = async () => {
-      const [claimsRes, notifRes, terminalsRes] = await Promise.all([
+      const [claimsRes, terminalsRes] = await Promise.all([
         window.api.listCampaignClaims(selectedId),
-        window.api.listNotifications(true),
         window.api.listTerminals(selectedId),
       ]);
       if (cancelled) return;
       if (claimsRes.ok) setClaims(claimsRes.result);
-      if (notifRes.ok) setNotifications(notifRes.result);
       // Shows up here purely from being spawned with an agent adapter — no
       // claim required, so a pane-launched agent is visible immediately
       // instead of only after (if ever) it calls the claim_pr MCP tool.
       if (terminalsRes.ok) {
-        setRunningAgents(terminalsRes.result.filter((s) => s.status === "active" && s.agentAdapterId !== null));
+        setRunningAgents(terminalsRes.result.filter((s) => s.status === "active" && s.agentAdapterName !== null));
       }
     };
 
@@ -617,13 +652,9 @@ function LivePanel({ onJump }: { onJump: (campaignId: number, terminalId: number
     };
   }, [selectedId]);
 
-  const sessionsForNotifications = useSessionLookup(notifications.map((n) => n.sessionId));
-
-  const ack = async (id: number) => {
-    await window.api.acknowledgeNotification(id);
-    const res = await window.api.listNotifications(true);
-    if (res.ok) setNotifications(res.result);
-  };
+  // A claim only carries the raw session_id string it was made with — this
+  // is what makes a claim tile clickable/jumpable, same mechanism as Inbox.
+  const sessionsForClaims = useSessionLookup(claims.map((c) => c.sessionId));
 
   const release = async (prId: number) => {
     await window.api.releaseClaim(prId);
@@ -640,62 +671,53 @@ function LivePanel({ onJump }: { onJump: (campaignId: number, terminalId: number
           <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={setSelectedId} />
         </div>
       )}
-      <div className="live-board">
-        <div className="live-section">
-          <h2>Active agents</h2>
-          {claims.length === 0 && runningAgents.length === 0 ? (
-            <p className="empty-hint">No agents running.</p>
-          ) : (
-            <ul className="claim-list">
-              {claims.map((c) => (
-                <li key={`claim-${c.id}`} className="claim-card">
-                  <div className="c-repo">{c.repoName}</div>
-                  <div className="c-step">
-                    {c.stepName} · {c.lifecycle}
+      {claims.length === 0 && runningAgents.length === 0 ? (
+        <p className="empty-hint">No agents running.</p>
+      ) : (
+        <ul className="claim-list">
+          {claims.map((c) => {
+            const session = sessionsForClaims[c.sessionId];
+            return (
+              <li
+                key={`claim-${c.id}`}
+                className={`claim-card ${session ? "clickable" : ""}`}
+                onClick={session ? () => onJump(session.campaignId, session.id) : undefined}
+              >
+                <div className="c-repo">{c.repoName}</div>
+                <div className="c-step">
+                  {c.stepName} · {c.lifecycle}
+                </div>
+                {c.note && <div className="c-note">{c.note}</div>}
+                <div className="c-agent-row">
+                  <div className="c-agent">
+                    {c.agentId} · {elapsed(c.claimedAt)} ago
                   </div>
-                  {c.note && <div className="c-note">{c.note}</div>}
-                  <div className="c-agent-row">
-                    <div className="c-agent">
-                      {c.agentId} · {elapsed(c.claimedAt)} ago
-                    </div>
-                    <button onClick={() => release(c.prId)}>Release</button>
-                  </div>
-                </li>
-              ))}
-              {/* Running from a pane launch, not (yet, or ever) claiming a
-                  specific PR — shown purely because the process is alive, no
-                  cooperation from the agent required. May overlap with a
-                  claim above once/if it does self-claim; not worth
-                  correlating the two just to de-duplicate. */}
-              {runningAgents.map((s) => (
-                <li key={`session-${s.id}`} className="claim-card">
-                  <div className="c-repo">{s.agentName}</div>
-                  <div className="c-step">{s.cwd}</div>
-                  <div className="c-agent">running · {elapsed(s.createdAt)}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="live-section">
-          <h2>Waiting on you</h2>
-          {notifications.length === 0 ? (
-            <p className="empty-hint">Nothing waiting.</p>
-          ) : (
-            <ul className="notification-list">
-              {notifications.map((n) => (
-                <NotificationCard
-                  key={n.id}
-                  notification={n}
-                  session={sessionsForNotifications[n.sessionId]}
-                  onAck={ack}
-                  onJump={onJump}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      release(c.prId);
+                    }}
+                  >
+                    Release
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+          {/* Running from a pane launch, not (yet, or ever) claiming a
+              specific PR — shown purely because the process is alive, no
+              cooperation from the agent required. May overlap with a claim
+              above once/if it does self-claim; not worth correlating the
+              two just to de-duplicate. */}
+          {runningAgents.map((s) => (
+            <li key={`session-${s.id}`} className="claim-card clickable" onClick={() => onJump(s.campaignId, s.id)}>
+              <div className="c-repo">{titles[s.id] ?? s.label ?? s.agentAdapterName}</div>
+              <div className="c-step">{s.cwd}</div>
+              <div className="c-agent">running · {elapsed(s.createdAt)}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -825,204 +847,17 @@ function RulesPanel() {
   );
 }
 
-function AgentsPanel() {
-  const [adapters, setAdapters] = useState<AgentAdapter[] | null>(null);
-  const [name, setName] = useState("");
-  const [binary, setBinary] = useState("");
-  const [yoloFlag, setYoloFlag] = useState("");
-  const [mcpConfigFlag, setMcpConfigFlag] = useState("");
-  const [sessionIdFlag, setSessionIdFlag] = useState("");
-  const [resumeFlag, setResumeFlag] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editBinary, setEditBinary] = useState("");
-  const [editYoloFlag, setEditYoloFlag] = useState("");
-  const [editMcpConfigFlag, setEditMcpConfigFlag] = useState("");
-  const [editSessionIdFlag, setEditSessionIdFlag] = useState("");
-  const [editResumeFlag, setEditResumeFlag] = useState("");
-
-  const reload = async () => {
-    const res = await window.api.listAgentAdapters();
-    setAdapters(res.ok ? res.result : null);
-    if (!res.ok) setError(res.error);
-  };
-
-  useEffect(() => {
-    reload();
-  }, []);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const res = await window.api.createAgentAdapter(
-      name,
-      binary,
-      yoloFlag || undefined,
-      mcpConfigFlag || undefined,
-      sessionIdFlag || undefined,
-      resumeFlag || undefined,
-    );
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    setName("");
-    setBinary("");
-    setYoloFlag("");
-    setMcpConfigFlag("");
-    setSessionIdFlag("");
-    setResumeFlag("");
-    reload();
-  };
-
-  const remove = async (id: number) => {
-    const res = await window.api.deleteAgentAdapter(id);
-    if (!res.ok) setError(res.error);
-    reload();
-  };
-
-  const startEdit = (adapter: AgentAdapter) => {
-    setEditingId(adapter.id);
-    setEditName(adapter.name);
-    setEditBinary(adapter.binary);
-    setEditYoloFlag(adapter.yoloFlag ?? "");
-    setEditMcpConfigFlag(adapter.mcpConfigFlag ?? "");
-    setEditSessionIdFlag(adapter.sessionIdFlag ?? "");
-    setEditResumeFlag(adapter.resumeFlag ?? "");
-  };
-
-  const cancelEdit = () => setEditingId(null);
-
-  const saveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingId === null) return;
-    setError(null);
-    const res = await window.api.updateAgentAdapter(editingId, {
-      name: editName,
-      binary: editBinary,
-      yoloFlag: editYoloFlag,
-      mcpConfigFlag: editMcpConfigFlag,
-      sessionIdFlag: editSessionIdFlag,
-      resumeFlag: editResumeFlag,
-    });
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    setEditingId(null);
-    reload();
-  };
-
-  return (
-    <div className="panel">
-      <form className="rule-form" onSubmit={submit}>
-        <input placeholder="name (e.g. Claude)" value={name} onChange={(e) => setName(e.target.value)} />
-        <input placeholder="binary (e.g. claude)" value={binary} onChange={(e) => setBinary(e.target.value)} />
-        <input
-          placeholder="yolo flag (optional, e.g. --dangerously-skip-permissions)"
-          value={yoloFlag}
-          onChange={(e) => setYoloFlag(e.target.value)}
-        />
-        <input
-          placeholder="mcp config flag (optional, e.g. --mcp-config {path})"
-          value={mcpConfigFlag}
-          onChange={(e) => setMcpConfigFlag(e.target.value)}
-        />
-        <input
-          placeholder="session id flag (optional, e.g. --session-id {sessionId})"
-          value={sessionIdFlag}
-          onChange={(e) => setSessionIdFlag(e.target.value)}
-        />
-        <input
-          placeholder="resume flag (optional, e.g. --resume {sessionId})"
-          value={resumeFlag}
-          onChange={(e) => setResumeFlag(e.target.value)}
-        />
-        <button type="submit">Add agent</button>
-      </form>
-      {error && <p className="status status-down">{error}</p>}
-      {adapters === null && <p className="status status-pending">Loading…</p>}
-      {adapters?.length === 0 && <p className="status status-pending">No agents yet.</p>}
-      <ul className="rule-list">
-        {adapters?.map((adapter) =>
-          editingId === adapter.id ? (
-            <li key={adapter.id} className="rule-item">
-              <form className="rule-edit-form" onSubmit={saveEdit}>
-                <div className="rule-item-row">
-                  <input
-                    className="rule-edit-pattern"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                  />
-                  <div className="rule-item-actions">
-                    <button type="submit">Save</button>
-                    <button type="button" onClick={cancelEdit}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-                <input
-                  className="rule-edit-pattern"
-                  placeholder="binary"
-                  value={editBinary}
-                  onChange={(e) => setEditBinary(e.target.value)}
-                />
-                <input
-                  className="rule-edit-pattern"
-                  placeholder="yolo flag (optional)"
-                  value={editYoloFlag}
-                  onChange={(e) => setEditYoloFlag(e.target.value)}
-                />
-                <input
-                  className="rule-edit-pattern"
-                  placeholder="mcp config flag (optional)"
-                  value={editMcpConfigFlag}
-                  onChange={(e) => setEditMcpConfigFlag(e.target.value)}
-                />
-                <input
-                  className="rule-edit-pattern"
-                  placeholder="session id flag (optional)"
-                  value={editSessionIdFlag}
-                  onChange={(e) => setEditSessionIdFlag(e.target.value)}
-                />
-                <input
-                  className="rule-edit-pattern"
-                  placeholder="resume flag (optional)"
-                  value={editResumeFlag}
-                  onChange={(e) => setEditResumeFlag(e.target.value)}
-                />
-              </form>
-            </li>
-          ) : (
-            <li key={adapter.id} className="rule-item">
-              <div className="rule-item-row">
-                <code>{adapter.name}</code>
-                <div className="rule-item-actions">
-                  <button onClick={() => startEdit(adapter)}>Edit</button>
-                  <button onClick={() => remove(adapter.id)}>Delete</button>
-                </div>
-              </div>
-              <span className="rule-item-context">
-                {adapter.binary}
-                {adapter.yoloFlag ? ` · ${adapter.yoloFlag}` : ""}
-                {adapter.mcpConfigFlag ? ` · ${adapter.mcpConfigFlag}` : ""}
-                {adapter.sessionIdFlag ? ` · ${adapter.sessionIdFlag}` : ""}
-                {adapter.resumeFlag ? ` · ${adapter.resumeFlag}` : ""}
-              </span>
-            </li>
-          ),
-        )}
-      </ul>
-    </div>
-  );
-}
-
 // ── Inbox ─────────────────────────────────────────────────────────────────────
 
 // Always visible below whichever sidebar tab is active — not a tab itself,
 // so it can't be navigated away from and forgotten about.
-function InboxPanel({ onJump }: { onJump: (campaignId: number, terminalId: number) => void }) {
+function InboxPanel({
+  onJump,
+  titles,
+}: {
+  onJump: (campaignId: number, terminalId: number) => void;
+  titles: Record<number, string>;
+}) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
@@ -1055,7 +890,14 @@ function InboxPanel({ onJump }: { onJump: (campaignId: number, terminalId: numbe
       ) : (
         <ul className="notification-list">
           {notifications.map((n) => (
-            <NotificationCard key={n.id} notification={n} session={sessions[n.sessionId]} onAck={ack} onJump={onJump} />
+            <NotificationCard
+              key={n.id}
+              notification={n}
+              session={sessions[n.sessionId]}
+              titles={titles}
+              onAck={ack}
+              onJump={onJump}
+            />
           ))}
         </ul>
       )}

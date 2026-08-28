@@ -117,7 +117,7 @@ function PaneLauncher({
   resume,
 }: {
   adapters: AgentAdapter[];
-  onLaunch: (adapterId: number | undefined, yolo: boolean, extraArgs: string) => void;
+  onLaunch: (adapterName: string | undefined, yolo: boolean, extraArgs: string) => void;
   // Present when this pane's previous occupant exited but left behind a
   // resumable agent conversation (resume_flag + agent_session_id) — offers
   // continuing it instead of only falling back to a fresh shell/agent.
@@ -155,7 +155,7 @@ function PaneLauncher({
       <div className="pane-launcher-buttons">
         <button onClick={() => onLaunch(undefined, false, extraArgs)}>Shell</button>
         {adapters.map((a) => (
-          <button key={a.id} onClick={() => onLaunch(a.id, yolo, extraArgs)}>
+          <button key={a.name} onClick={() => onLaunch(a.name, yolo, extraArgs)}>
             {a.name}
           </button>
         ))}
@@ -191,7 +191,7 @@ function PaneView({
   onActivate: (paneId: string) => void;
   onSplit: (paneId: string, dir: "row" | "col") => void;
   onClosePane: (paneId: string, sessionId?: number) => void;
-  onLaunch: (paneId: string, adapterId: number | undefined, yolo: boolean, extraArgs: string) => void;
+  onLaunch: (paneId: string, adapterName: string | undefined, yolo: boolean, extraArgs: string) => void;
   onResume: (paneId: string, terminalId: number) => void;
   onRatioChange: (splitId: string, ratio: number) => void;
   onRatioCommit: (splitId: string, ratio: number) => void;
@@ -219,13 +219,13 @@ function PaneView({
   const session = node.sessionId !== null ? sessions.find((s) => s.id === node.sessionId) : undefined;
   const isActive = activePaneId === node.id;
   const isExited = session?.status === "exited";
-  const adapter = session?.agentAdapterId != null ? adapters.find((a) => a.id === session.agentAdapterId) : undefined;
+  const adapter = session?.agentAdapterName != null ? adapters.find((a) => a.name === session.agentAdapterName) : undefined;
   const canResume = isExited && adapter?.resumeFlag != null && session?.agentSessionId != null;
 
   return (
     <div className={`terminal-grid-pane ${isActive ? "active" : ""}`} onMouseDownCapture={() => onActivate(node.id)}>
       {node.sessionId === null ? (
-        <PaneLauncher adapters={adapters} onLaunch={(adapterId, yolo, extraArgs) => onLaunch(node.id, adapterId, yolo, extraArgs)} />
+        <PaneLauncher adapters={adapters} onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)} />
       ) : !session ? (
         <p className="status status-pending pane-loading">Loading…</p>
       ) : (
@@ -252,7 +252,7 @@ function PaneView({
             // agent conversation again when it's resumable.
             <PaneLauncher
               adapters={adapters}
-              onLaunch={(adapterId, yolo, extraArgs) => onLaunch(node.id, adapterId, yolo, extraArgs)}
+              onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)}
               resume={canResume ? { agentName: adapter!.name, onResume: () => onResume(node.id, session.id) } : undefined}
             />
           ) : (
@@ -308,6 +308,8 @@ export function TerminalsMain({
   campaignId,
   focusRequest,
   onFocusHandled,
+  titles,
+  onTitleChange,
 }: {
   campaignId: number | null;
   // Set by App (e.g. "Jump to agent" from the Inbox) to ask this campaign's
@@ -316,10 +318,13 @@ export function TerminalsMain({
   // doesn't keep re-triggering.
   focusRequest?: { campaignId: number; terminalId: number } | null;
   onFocusHandled?: () => void;
+  // Lifted to App so the Army tab can also show a session's live title
+  // (nicer than its adapter name/label) without duplicating this state.
+  titles: Record<number, string>;
+  onTitleChange: (id: number, title: string) => void;
 }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
-  const [titles, setTitles] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [adapters, setAdapters] = useState<AgentAdapter[]>([]);
 
@@ -443,7 +448,7 @@ export function TerminalsMain({
     if (res.ok) setSessions(res.result);
   };
 
-  const handleLaunch = async (paneId: string, adapterId: number | undefined, yolo: boolean, extraArgs: string) => {
+  const handleLaunch = async (paneId: string, adapterName: string | undefined, yolo: boolean, extraArgs: string) => {
     if (!activeLayout || campaignId === null) return;
     setError(null);
     if (!campaign?.defaultDir) {
@@ -454,9 +459,9 @@ export function TerminalsMain({
       campaignId,
       undefined,
       undefined,
-      adapterId,
-      adapterId ? yolo : undefined,
-      adapterId && extraArgs.trim() ? extraArgs.trim() : undefined,
+      adapterName,
+      adapterName ? yolo : undefined,
+      adapterName && extraArgs.trim() ? extraArgs.trim() : undefined,
       undefined,
     );
     if (!res.ok) {
@@ -636,7 +641,7 @@ export function TerminalsMain({
             titles={titles}
             adapters={adapters}
             activePaneId={activePaneId}
-            onTitle={(id, title) => setTitles((prev) => ({ ...prev, [id]: title }))}
+            onTitle={onTitleChange}
             onActivate={setActivePaneId}
             onSplit={handleSplit}
             onClosePane={handleClosePane}

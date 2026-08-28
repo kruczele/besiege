@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
+import { findAgentConfig } from "../agent-config.js";
 import {
   attachSubscriber,
   killSession,
@@ -16,17 +17,9 @@ interface CampaignRow {
   default_dir: string | null;
 }
 
-interface TerminalSessionWithAgentRow extends TerminalSessionRow {
-  agent_name: string | null;
-}
+const SELECT_SESSION = "SELECT * FROM terminal_sessions ts";
 
-const SELECT_SESSION = `
-  SELECT ts.*, aa.name AS agent_name
-  FROM terminal_sessions ts
-  LEFT JOIN agent_adapters aa ON aa.id = ts.agent_adapter_id
-`;
-
-const toSession = (r: TerminalSessionWithAgentRow) => ({
+const toSession = (r: TerminalSessionRow) => ({
   id: r.id,
   campaignId: r.campaign_id,
   label: r.label,
@@ -36,8 +29,7 @@ const toSession = (r: TerminalSessionWithAgentRow) => ({
   exitCode: r.exit_code,
   createdAt: r.created_at,
   exitedAt: r.exited_at,
-  agentAdapterId: r.agent_adapter_id,
-  agentName: r.agent_name,
+  agentAdapterName: r.agent_adapter_name,
   yolo: Boolean(r.yolo),
   extraArgs: r.extra_args,
   agentSessionId: r.agent_session_id,
@@ -55,7 +47,7 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
     async (req, reply) => {
       const row = db
         .prepare(`${SELECT_SESSION} WHERE ts.agent_session_id = ? ORDER BY ts.id DESC LIMIT 1`)
-        .get(req.params.agentSessionId) as TerminalSessionWithAgentRow | undefined;
+        .get(req.params.agentSessionId) as TerminalSessionRow | undefined;
       if (!row) {
         reply.code(404);
         return { error: "not found" };
@@ -74,7 +66,7 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
       }
       const rows = db
         .prepare(`${SELECT_SESSION} WHERE ts.campaign_id = ? ORDER BY ts.id DESC`)
-        .all(req.params.campaignId) as TerminalSessionWithAgentRow[];
+        .all(req.params.campaignId) as TerminalSessionRow[];
       return rows.map(toSession);
     },
   );
@@ -84,7 +76,7 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
     Body: {
       cwd?: string;
       label?: string;
-      agentAdapterId?: number;
+      agentAdapterName?: string;
       yolo?: boolean;
       extraArgs?: string;
       // Manual counterpart to the boot-time auto-resume (terminals.ts
@@ -111,14 +103,12 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
         reply.code(404);
         return { error: "session to resume from not found" };
       }
-      if (!prior.agent_adapter_id || !prior.agent_session_id) {
+      if (!prior.agent_adapter_name || !prior.agent_session_id) {
         reply.code(400);
         return { error: "session has no resumable agent conversation" };
       }
-      const adapter = db
-        .prepare("SELECT resume_flag FROM agent_adapters WHERE id = ?")
-        .get(prior.agent_adapter_id) as { resume_flag: string | null } | undefined;
-      if (!adapter?.resume_flag) {
+      const adapter = findAgentConfig(prior.agent_adapter_name);
+      if (!adapter?.resumeFlag) {
         reply.code(400);
         return { error: "adapter does not support resume" };
       }
@@ -127,14 +117,14 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
         Number(req.params.campaignId),
         prior.cwd,
         prior.label ?? undefined,
-        prior.agent_adapter_id,
+        prior.agent_adapter_name,
         Boolean(prior.yolo),
         prior.extra_args ?? undefined,
         prior.agent_session_id,
       );
       const withAgent = db
         .prepare(`${SELECT_SESSION} WHERE ts.id = ?`)
-        .get(resumed.id) as TerminalSessionWithAgentRow;
+        .get(resumed.id) as TerminalSessionRow;
       reply.code(201);
       return toSession(withAgent);
     }
@@ -145,13 +135,10 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
       return { error: "campaign has no default_dir; pass cwd explicitly" };
     }
 
-    const agentAdapterId = req.body?.agentAdapterId;
-    if (agentAdapterId !== undefined) {
-      const adapter = db.prepare("SELECT id FROM agent_adapters WHERE id = ?").get(agentAdapterId);
-      if (!adapter) {
-        reply.code(400);
-        return { error: "agent adapter not found" };
-      }
+    const agentAdapterName = req.body?.agentAdapterName;
+    if (agentAdapterName !== undefined && !findAgentConfig(agentAdapterName)) {
+      reply.code(400);
+      return { error: "agent adapter not found" };
     }
 
     const row = spawnSession(
@@ -159,18 +146,18 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
       Number(req.params.campaignId),
       cwd,
       req.body?.label?.trim(),
-      agentAdapterId,
+      agentAdapterName,
       req.body?.yolo,
       req.body?.extraArgs,
     );
-    const withAgent = db.prepare(`${SELECT_SESSION} WHERE ts.id = ?`).get(row.id) as TerminalSessionWithAgentRow;
+    const withAgent = db.prepare(`${SELECT_SESSION} WHERE ts.id = ?`).get(row.id) as TerminalSessionRow;
     reply.code(201);
     return toSession(withAgent);
   });
 
   app.get<{ Params: { id: string } }>("/terminals/:id", async (req, reply) => {
     const row = db.prepare(`${SELECT_SESSION} WHERE ts.id = ?`).get(req.params.id) as
-      | TerminalSessionWithAgentRow
+      | TerminalSessionRow
       | undefined;
     if (!row) {
       reply.code(404);

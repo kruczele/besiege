@@ -48,22 +48,21 @@ export interface TerminalSession {
   exitCode: number | null;
   createdAt: string;
   exitedAt: string | null;
-  agentAdapterId: number | null;
-  agentName: string | null;
+  agentAdapterName: string | null;
   yolo: boolean;
   extraArgs: string | null;
   agentSessionId: string | null;
 }
 
+// A hand-edited YAML config (agents.default.yaml + agents.local.yaml), not a
+// database table — read-only from the GUI's perspective, no id/createdAt.
 export interface AgentAdapter {
-  id: number;
   name: string;
   binary: string;
   yoloFlag: string | null;
   mcpConfigFlag: string | null;
   sessionIdFlag: string | null;
   resumeFlag: string | null;
-  createdAt: string;
 }
 
 // A pane grid is an arbitrary tmux-style binary split tree rather than a

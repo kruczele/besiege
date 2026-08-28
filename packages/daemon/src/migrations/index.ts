@@ -352,19 +352,30 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: "0023_terminal_session_agent_adapter_name",
+    sql: `
+      -- Agent adapters moved from the agent_adapters table to a hand-edited
+      -- YAML config (agents.default.yaml + agents.local.yaml, see
+      -- agent-config.ts) — a name is a stable identifier there, an
+      -- autoincrement id isn't. agent_adapter_id is left in place (additive
+      -- migrations only) but no longer written to.
+      ALTER TABLE terminal_sessions ADD COLUMN agent_adapter_name TEXT;
+    `,
+  },
 ];
 
 // Seeded once as a `config_rules` row (pattern '*', so it's injected into
 // every session's SessionStart additionalContext regardless of cwd) —
 // deliberately just data, not special-cased code, so it shows up in the
-// Rules tab like any other rule and the user can edit or delete it freely.
+// Edicts tab like any other rule and the user can edit or delete it freely.
 const BESIEGE_ORIENTATION_RULE = `You're running inside Besiege, a daemon-backed console for coding-agent work across multiple repos in a campaign. A few things worth knowing:
 
 - Environment: BESIEGE_CAMPAIGN_ID and BESIEGE_SESSION_ID identify this session; BESIEGE_STEP_ID/BESIEGE_PR_ID/BESIEGE_REPO are also set if you were dispatched against a specific PR.
 - The besiege MCP server, if wired into this session, exposes pr_state / pending_tasks / failure_pattern for reading campaign state, and claim_pr / release_pr / create_task / notify / register_pr for acting on it.
-- Once you've actually opened a PR (e.g. after \`gh pr create\`), call register_pr — that's the only way the daemon learns it exists at all. It takes a list, so if you're working across many repos, register them all in one call instead of one call each.
-- Once you know which (repo, step) you're actually working on, call claim_pr — that's what makes you show up as an active agent on the campaign's Live board. It's cheap and advisory, so call it as soon as you know, not only once you're sure.
+- Once you've actually opened a PR (e.g. after \`gh pr create\`), call register_pr — that's the only way the daemon learns it exists at all. It takes a list, so if you're working across many repos, register them all in one call instead of one call each. A repo doesn't need to be registered in the campaign beforehand — register_pr (and claim_pr) add it automatically the first time you mention it.
+- Once you know which (repo, step) you're actually working on, call claim_pr — that's what makes you show up with real PR context on the campaign's Army tab. It's cheap and advisory, so call it as soon as you know, not only once you're sure.
 - If you get blocked or have a question that needs a human, call notify instead of just stopping silently — it goes straight into the operator's attention inbox.
 - If you find work that should apply to every PR in a step, not just the one you're on, register it with create_task instead of only fixing it locally.
 
-This rule was seeded by Besiege and applies everywhere (pattern '*'). Edit or delete it from the Rules tab if it stops being accurate.`;
+This rule was seeded by Besiege and applies everywhere (pattern '*'). Edit or delete it from the Edicts tab if it stops being accurate.`;
