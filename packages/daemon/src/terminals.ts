@@ -2,6 +2,7 @@ import * as pty from "@lydell/node-pty";
 import type { IPty } from "@lydell/node-pty";
 import type Database from "better-sqlite3";
 import type { WebSocket } from "ws";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,6 +26,7 @@ export interface TerminalSessionRow {
   agent_adapter_id: number | null;
   yolo: number;
   extra_args: string | null;
+  agent_session_id: string | null;
 }
 
 interface AgentAdapterRow {
@@ -33,6 +35,8 @@ interface AgentAdapterRow {
   binary: string;
   yolo_flag: string | null;
   mcp_config_flag: string | null;
+  session_id_flag: string | null;
+  resume_flag: string | null;
   created_at: string;
 }
 
@@ -124,6 +128,9 @@ export function spawnSession(
   agentAdapterId?: number,
   yolo?: boolean,
   extraArgs?: string,
+  // Set only by resumeSessionsOnBoot, continuing a prior agent conversation
+  // by id instead of minting a fresh one.
+  resumeAgentSessionId?: string,
 ): TerminalSessionRow {
   cwd = expandHome(cwd);
 
@@ -137,8 +144,25 @@ export function spawnSession(
   const mcpArgs = adapter?.mcp_config_flag
     ? splitArgs(adapter.mcp_config_flag).map((token) => token.replace("{path}", ensureMcpConfig()))
     : [];
+
+  // A fresh session on an adapter that supports resume gets a pinned id up
+  // front, so a later daemon restart has something to pass to resume_flag;
+  // a boot-time resume instead reuses the id it's continuing.
+  const agentSessionId = resumeAgentSessionId ?? (adapter?.session_id_flag ? randomUUID() : null);
+  const sessionArgs =
+    resumeAgentSessionId && adapter?.resume_flag
+      ? splitArgs(adapter.resume_flag).map((token) => token.replace("{sessionId}", resumeAgentSessionId))
+      : agentSessionId && adapter?.session_id_flag
+        ? splitArgs(adapter.session_id_flag).map((token) => token.replace("{sessionId}", agentSessionId))
+        : [];
+
   const argv = adapter
-    ? [...mcpArgs, ...(yolo && adapter.yolo_flag ? [adapter.yolo_flag] : []), ...(extraArgs ? splitArgs(extraArgs) : [])]
+    ? [
+        ...mcpArgs,
+        ...sessionArgs,
+        ...(yolo && adapter.yolo_flag ? [adapter.yolo_flag] : []),
+        ...(extraArgs ? splitArgs(extraArgs) : []),
+      ]
     : [];
 
   const proc = pty.spawn(command, argv, { cols: 80, rows: 24, cwd, env: process.env });
@@ -146,7 +170,7 @@ export function spawnSession(
   const createdAt = new Date().toISOString();
   const info = db
     .prepare(
-      "INSERT INTO terminal_sessions (campaign_id, label, cwd, pid, status, created_at, agent_adapter_id, yolo, extra_args) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)",
+      "INSERT INTO terminal_sessions (campaign_id, label, cwd, pid, status, created_at, agent_adapter_id, yolo, extra_args, agent_session_id) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)",
     )
     .run(
       campaignId,
@@ -157,6 +181,7 @@ export function spawnSession(
       adapter?.id ?? null,
       yolo && adapter ? 1 : 0,
       adapter && extraArgs?.trim() ? extraArgs.trim() : null,
+      agentSessionId,
     );
   const id = Number(info.lastInsertRowid);
 
@@ -242,8 +267,52 @@ export function killAllLiveSessions(db: Database.Database): void {
   }
 }
 
-export function reapStaleSessionsOnBoot(db: Database.Database): void {
-  db.prepare(
-    "UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE status = 'active'",
-  ).run(new Date().toISOString());
+// No PTY can survive a daemon restart (the IPty handle only ever lived in
+// this process's `live` map), so every row still marked 'active' from a
+// previous process is stale by definition. Unlike the old reap-only
+// behavior, a session on an adapter with resume support gets relaunched
+// under a new pid but the *same* agent_session_id, so the agent CLI's own
+// conversation continues (assuming that CLI persists its transcript by
+// session id — Besiege's part is just passing the right resume flag).
+// Returns old-id -> new-id (or null if not resumed) so the caller can
+// rewrite layout trees to point at the resumed sessions.
+export function resumeSessionsOnBoot(db: Database.Database): Map<number, number | null> {
+  const staleRows = db
+    .prepare(
+      `SELECT ts.*, aa.resume_flag AS adapter_resume_flag
+       FROM terminal_sessions ts
+       LEFT JOIN agent_adapters aa ON aa.id = ts.agent_adapter_id
+       WHERE ts.status = 'active'`,
+    )
+    .all() as (TerminalSessionRow & { adapter_resume_flag: string | null })[];
+
+  const idMap = new Map<number, number | null>();
+  const now = new Date().toISOString();
+
+  for (const row of staleRows) {
+    let resumedId: number | null = null;
+    if (row.agent_adapter_id && row.adapter_resume_flag && row.agent_session_id) {
+      try {
+        const resumed = spawnSession(
+          db,
+          row.campaign_id,
+          row.cwd,
+          row.label ?? undefined,
+          row.agent_adapter_id,
+          Boolean(row.yolo),
+          row.extra_args ?? undefined,
+          row.agent_session_id,
+        );
+        resumedId = resumed.id;
+      } catch {
+        // Binary missing, bad flag template, etc — fall through and treat
+        // this session like any other unresumable one below.
+        resumedId = null;
+      }
+    }
+    idMap.set(row.id, resumedId);
+    db.prepare("UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE id = ?").run(now, row.id);
+  }
+
+  return idMap;
 }

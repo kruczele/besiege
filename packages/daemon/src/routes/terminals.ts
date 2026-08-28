@@ -9,6 +9,7 @@ import {
   writeToSession,
   type TerminalSessionRow,
 } from "../terminals.js";
+import { pruneSessionFromLayouts } from "./layouts.js";
 
 interface CampaignRow {
   id: number;
@@ -122,11 +123,16 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
   });
 
   app.delete<{ Params: { id: string } }>("/terminals/:id", async (req, reply) => {
-    const removed = removeSession(db, Number(req.params.id));
+    const id = Number(req.params.id);
+    const existing = db.prepare("SELECT campaign_id FROM terminal_sessions WHERE id = ?").get(id) as
+      | { campaign_id: number }
+      | undefined;
+    const removed = removeSession(db, id);
     if (!removed) {
       reply.code(404);
       return { error: "not found" };
     }
+    if (existing) pruneSessionFromLayouts(db, existing.campaign_id, id);
     reply.code(204);
   });
 

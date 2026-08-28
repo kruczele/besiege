@@ -30,6 +30,7 @@ export function openDb(): Database.Database {
     if (applied.has(migration.name)) continue;
     db.transaction(() => {
       db.exec(migration.sql);
+      migration.after?.(db);
       insertMigration.run(migration.name, new Date().toISOString());
     })();
   }

@@ -319,13 +319,29 @@ h1 {
   margin-bottom: 1rem;
 }
 
-.campaign-toolbar select {
+.campaign-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.campaign-picker-btn {
   background: #1b1e27;
-  border: 1px solid #2a2e38;
-  border-radius: 4px;
+  border: none;
+  border-radius: 999px;
+  color: #9ba1b0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.campaign-picker-btn:hover {
   color: #e7e8ed;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.85rem;
+}
+
+.campaign-picker-btn.selected {
+  background: #2a3352;
+  color: #e7e8ed;
 }
 
 .campaign-toolbar button {
@@ -487,118 +503,6 @@ h1 {
   flex-direction: column;
 }
 
-.browser-tabs {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.2rem;
-  padding: 0.5rem 0.75rem 0;
-  background: #14161c;
-  border-bottom: 1px solid #2a2e38;
-  overflow-x: auto;
-}
-
-.browser-tab {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  max-width: 14rem;
-  padding: 0.45rem 0.5rem 0.45rem 0.7rem;
-  border-radius: 6px 6px 0 0;
-  font-size: 0.8rem;
-  color: #9ba1b0;
-  background: #1b1e27;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.browser-tab.selected {
-  background: #23262f;
-  color: #e7e8ed;
-}
-
-.browser-tab-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #6b7280;
-}
-
-.browser-tab.active .browser-tab-dot {
-  background: #35b37e;
-}
-
-.browser-tab-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.browser-tab.exited .browser-tab-title {
-  color: #6b7280;
-}
-
-.browser-tab-kill {
-  background: none;
-  border: none;
-  color: inherit;
-  opacity: 0.5;
-  cursor: pointer;
-  font-size: 0.9rem;
-  line-height: 1;
-  padding: 0.1rem 0.2rem;
-}
-
-.browser-tab-kill:hover {
-  opacity: 1;
-}
-
-.browser-tab-new {
-  background: none;
-  border: none;
-  color: #6b7280;
-  font-size: 1rem;
-  cursor: pointer;
-  padding: 0.3rem 0.6rem;
-  margin-bottom: 0.1rem;
-}
-
-.browser-tab-new:hover {
-  color: #e7e8ed;
-}
-
-.terminal-launcher {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-left: auto;
-  margin-bottom: 0.1rem;
-  padding-left: 0.5rem;
-}
-
-.terminal-launcher select,
-.terminal-launcher-args {
-  background: #1b1e27;
-  border: 1px solid #2a2e38;
-  border-radius: 4px;
-  color: #e7e8ed;
-  padding: 0.3rem 0.4rem;
-  font-family: inherit;
-  font-size: 0.78rem;
-}
-
-.terminal-launcher-args {
-  width: 9rem;
-}
-
-.terminal-launcher-yolo {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  color: #9ba1b0;
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
 .terminal-viewport {
   flex: 1;
   min-height: 0;
@@ -676,32 +580,98 @@ h1 {
   border-color: #6c86ff;
 }
 
-.layout-form {
-  margin: 0.75rem;
-}
-
-.layout-form-sessions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-}
-
-.layout-form-session {
-  font-size: 0.8rem;
-}
-
-.layout-form-actions {
-  display: flex;
-  gap: 0.5rem;
+.layout-tab-rename {
+  background: #14161c;
+  border: 1px solid #6c86ff;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.15rem 0.35rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  width: 9rem;
 }
 
 .terminal-grid {
   flex: 1;
   min-height: 0;
-  display: grid;
-  gap: 0.5rem;
+  display: flex;
   padding: 0.5rem;
-  grid-auto-rows: 1fr;
+}
+
+.terminal-grid > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-split-col {
+  flex-direction: column;
+}
+
+.pane-split-child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-grow: 0;
+  /* Percentage flex-basis plus the divider's fixed width would otherwise sum
+     to over 100% — letting these shrink lets the browser take that fixed
+     width out of both sides proportionally instead of overflowing/clipping. */
+  flex-shrink: 1;
+}
+
+.pane-split-child > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane-divider {
+  flex: 0 0 auto;
+  background: transparent;
+  position: relative;
+}
+
+.pane-divider::after {
+  content: "";
+  position: absolute;
+  background: #2a2e38;
+}
+
+.pane-split-row > .pane-divider {
+  width: 0.5rem;
+  cursor: col-resize;
+}
+
+.pane-split-row > .pane-divider::after {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.pane-split-col > .pane-divider {
+  height: 0.5rem;
+  cursor: row-resize;
+}
+
+.pane-split-col > .pane-divider::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.pane-divider:hover::after {
+  background: #6c86ff;
 }
 
 .terminal-grid-pane {
@@ -712,6 +682,10 @@ h1 {
   border: 1px solid #2a2e38;
   border-radius: 6px;
   overflow: hidden;
+}
+
+.terminal-grid-pane.active {
+  border-color: #6c86ff;
 }
 
 .terminal-grid-pane-header {
@@ -732,6 +706,99 @@ h1 {
   white-space: nowrap;
 }
 
+.terminal-grid-pane-title.exited {
+  color: #6b7280;
+}
+
+.terminal-grid-pane-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.1rem;
+}
+
+.terminal-grid-pane-actions button {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  font-size: 0.85rem;
+}
+
+.terminal-grid-pane-actions button:hover {
+  opacity: 1;
+}
+
 .terminal-grid-pane .terminal-viewport {
   padding: 0.25rem;
+}
+
+.pane-loading {
+  margin: auto;
+}
+
+.pane-launcher {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.pane-launcher-options {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pane-launcher-args {
+  background: #1b1e27;
+  border: 1px solid #2a2e38;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.3rem 0.5rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  width: 11rem;
+}
+
+.pane-launcher-yolo {
+  background: #1b1e27;
+  border: 1px solid #2a2e38;
+  border-radius: 4px;
+  color: #9ba1b0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pane-launcher-yolo.active {
+  background: #422006;
+  border-color: #fb923c;
+  color: #fb923c;
+}
+
+.pane-launcher-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.pane-launcher-buttons button {
+  background: #2a2e38;
+  border: none;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.pane-launcher-buttons button:hover {
+  background: #3a3f50;
 }

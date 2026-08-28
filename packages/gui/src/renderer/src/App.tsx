@@ -177,6 +177,33 @@ function elapsed(iso: string) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// Button-row campaign switcher shared by CampaignsPanel and LivePanel —
+// there are only ever a handful of campaigns, so a pill row reads faster
+// than a dropdown and matches the rest of the "buttons over dropdowns" pass.
+function CampaignPicker({
+  campaigns,
+  selectedId,
+  onSelect,
+}: {
+  campaigns: Campaign[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}) {
+  return (
+    <div className="campaign-picker">
+      {campaigns.map((c) => (
+        <button
+          key={c.id}
+          className={`campaign-picker-btn ${selectedId === c.id ? "selected" : ""}`}
+          onClick={() => onSelect(c.id)}
+        >
+          {c.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function NewCampaignForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -301,16 +328,7 @@ function CampaignsPanel({
   return (
     <div className="panel">
       <div className="campaign-toolbar">
-        <select
-          value={selectedId ?? ""}
-          onChange={(e) => onSelectCampaign(Number(e.target.value))}
-        >
-          {campaigns.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={onSelectCampaign} />
         <label className="toggle">
           <input
             type="checkbox"
@@ -426,16 +444,7 @@ function LivePanel() {
     <div className="panel">
       {campaigns.length > 1 && (
         <div className="campaign-toolbar">
-          <select
-            value={selectedId ?? ""}
-            onChange={(e) => setSelectedId(Number(e.target.value))}
-          >
-            {campaigns.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={setSelectedId} />
         </div>
       )}
       <div className="live-board">
@@ -617,12 +626,16 @@ function AgentsPanel() {
   const [binary, setBinary] = useState("");
   const [yoloFlag, setYoloFlag] = useState("");
   const [mcpConfigFlag, setMcpConfigFlag] = useState("");
+  const [sessionIdFlag, setSessionIdFlag] = useState("");
+  const [resumeFlag, setResumeFlag] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editBinary, setEditBinary] = useState("");
   const [editYoloFlag, setEditYoloFlag] = useState("");
   const [editMcpConfigFlag, setEditMcpConfigFlag] = useState("");
+  const [editSessionIdFlag, setEditSessionIdFlag] = useState("");
+  const [editResumeFlag, setEditResumeFlag] = useState("");
 
   const reload = async () => {
     const res = await window.api.listAgentAdapters();
@@ -637,7 +650,14 @@ function AgentsPanel() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    const res = await window.api.createAgentAdapter(name, binary, yoloFlag || undefined, mcpConfigFlag || undefined);
+    const res = await window.api.createAgentAdapter(
+      name,
+      binary,
+      yoloFlag || undefined,
+      mcpConfigFlag || undefined,
+      sessionIdFlag || undefined,
+      resumeFlag || undefined,
+    );
     if (!res.ok) {
       setError(res.error);
       return;
@@ -646,6 +666,8 @@ function AgentsPanel() {
     setBinary("");
     setYoloFlag("");
     setMcpConfigFlag("");
+    setSessionIdFlag("");
+    setResumeFlag("");
     reload();
   };
 
@@ -661,6 +683,8 @@ function AgentsPanel() {
     setEditBinary(adapter.binary);
     setEditYoloFlag(adapter.yoloFlag ?? "");
     setEditMcpConfigFlag(adapter.mcpConfigFlag ?? "");
+    setEditSessionIdFlag(adapter.sessionIdFlag ?? "");
+    setEditResumeFlag(adapter.resumeFlag ?? "");
   };
 
   const cancelEdit = () => setEditingId(null);
@@ -674,6 +698,8 @@ function AgentsPanel() {
       binary: editBinary,
       yoloFlag: editYoloFlag,
       mcpConfigFlag: editMcpConfigFlag,
+      sessionIdFlag: editSessionIdFlag,
+      resumeFlag: editResumeFlag,
     });
     if (!res.ok) {
       setError(res.error);
@@ -697,6 +723,16 @@ function AgentsPanel() {
           placeholder="mcp config flag (optional, e.g. --mcp-config {path})"
           value={mcpConfigFlag}
           onChange={(e) => setMcpConfigFlag(e.target.value)}
+        />
+        <input
+          placeholder="session id flag (optional, e.g. --session-id {sessionId})"
+          value={sessionIdFlag}
+          onChange={(e) => setSessionIdFlag(e.target.value)}
+        />
+        <input
+          placeholder="resume flag (optional, e.g. --resume {sessionId})"
+          value={resumeFlag}
+          onChange={(e) => setResumeFlag(e.target.value)}
         />
         <button type="submit">Add agent</button>
       </form>
@@ -739,6 +775,18 @@ function AgentsPanel() {
                   value={editMcpConfigFlag}
                   onChange={(e) => setEditMcpConfigFlag(e.target.value)}
                 />
+                <input
+                  className="rule-edit-pattern"
+                  placeholder="session id flag (optional)"
+                  value={editSessionIdFlag}
+                  onChange={(e) => setEditSessionIdFlag(e.target.value)}
+                />
+                <input
+                  className="rule-edit-pattern"
+                  placeholder="resume flag (optional)"
+                  value={editResumeFlag}
+                  onChange={(e) => setEditResumeFlag(e.target.value)}
+                />
               </form>
             </li>
           ) : (
@@ -754,6 +802,8 @@ function AgentsPanel() {
                 {adapter.binary}
                 {adapter.yoloFlag ? ` · ${adapter.yoloFlag}` : ""}
                 {adapter.mcpConfigFlag ? ` · ${adapter.mcpConfigFlag}` : ""}
+                {adapter.sessionIdFlag ? ` · ${adapter.sessionIdFlag}` : ""}
+                {adapter.resumeFlag ? ` · ${adapter.resumeFlag}` : ""}
               </span>
             </li>
           ),

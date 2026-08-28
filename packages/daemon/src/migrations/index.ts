@@ -1,6 +1,13 @@
+import type Database from "better-sqlite3";
+import { chainFromSessionIds } from "../layout-tree.js";
+
 export interface Migration {
   name: string;
   sql: string;
+  // Runs once, in the same transaction as `sql`, right after it — for
+  // backfills that need JS logic (e.g. JSON tree construction) rather than
+  // being expressible as a plain SQL statement.
+  after?: (db: Database.Database) => void;
 }
 
 // Applied in array order, once each, tracked in schema_migrations.
@@ -279,6 +286,58 @@ export const migrations: Migration[] = [
         position INTEGER NOT NULL,
         UNIQUE (layout_id, terminal_session_id)
       );
+    `,
+  },
+  {
+    name: "0019_terminal_layout_tree",
+    sql: `
+      -- The grid is now an arbitrary tmux-style split tree (see PaneNode in
+      -- layout-tree.ts) instead of a flat, fixed-size square grid, so a
+      -- layout's content is a single JSON column rather than a join table.
+      -- terminal_layout_members is left in place (harmless, unused) rather
+      -- than dropped, matching this file's additive-only convention.
+      -- is_name_custom tracks whether 'name' was set by the user (sticks) or
+      -- should keep being recomputed from the first pane's live terminal
+      -- title.
+      ALTER TABLE terminal_layouts ADD COLUMN layout_tree TEXT NOT NULL DEFAULT '';
+      ALTER TABLE terminal_layouts ADD COLUMN is_name_custom INTEGER NOT NULL DEFAULT 0;
+    `,
+    after: (db) => {
+      const layouts = db.prepare("SELECT id FROM terminal_layouts").all() as { id: number }[];
+      const memberStmt = db.prepare(
+        "SELECT terminal_session_id FROM terminal_layout_members WHERE layout_id = ? ORDER BY position ASC",
+      );
+      const update = db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?");
+      for (const { id } of layouts) {
+        const memberIds = (memberStmt.all(id) as { terminal_session_id: number }[]).map(
+          (r) => r.terminal_session_id,
+        );
+        update.run(JSON.stringify(chainFromSessionIds(memberIds)), id);
+      }
+    },
+  },
+  {
+    name: "0020_agent_adapter_resume_flags",
+    sql: `
+      -- Flag templates (e.g. "--session-id {sessionId}" / "--resume {sessionId}")
+      -- for pinning and later resuming an agent CLI's own conversation, same
+      -- {placeholder} substitution pattern as mcp_config_flag's {path}. NULL
+      -- means this adapter's CLI has no known resume support — a daemon
+      -- restart just loses that session like it always has.
+      ALTER TABLE agent_adapters ADD COLUMN session_id_flag TEXT;
+      ALTER TABLE agent_adapters ADD COLUMN resume_flag TEXT;
+      UPDATE agent_adapters SET session_id_flag = '--session-id {sessionId}', resume_flag = '--resume {sessionId}'
+        WHERE binary = 'claude';
+    `,
+  },
+  {
+    name: "0021_terminal_session_agent_session_id",
+    sql: `
+      -- The agent CLI's own conversation/session id (distinct from this row's
+      -- own id, which changes across a resume since it's a new PID) — set at
+      -- spawn time when the adapter has a session_id_flag, carried forward
+      -- across a boot-time resume so the same id can be reused again next time.
+      ALTER TABLE terminal_sessions ADD COLUMN agent_session_id TEXT;
     `,
   },
 ];

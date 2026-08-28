@@ -1,58 +1,40 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
+import { emptyTree, remapSessionIds, sessionIdsInTree, type PaneNode } from "../layout-tree.js";
 
 interface TerminalLayoutRow {
   id: number;
   campaign_id: number;
   name: string;
   created_at: string;
+  layout_tree: string;
+  is_name_custom: number;
 }
 
-interface MemberRow {
-  layout_id: number;
-  terminal_session_id: number;
-}
-
-function toLayout(row: TerminalLayoutRow, sessionIds: number[]) {
+function toLayout(row: TerminalLayoutRow) {
   return {
     id: row.id,
     campaignId: row.campaign_id,
     name: row.name,
     createdAt: row.created_at,
-    sessionIds,
+    isNameCustom: Boolean(row.is_name_custom),
+    tree: JSON.parse(row.layout_tree) as PaneNode,
   };
 }
 
-function memberIdsByLayout(db: Database.Database, layoutIds: number[]): Map<number, number[]> {
-  const map = new Map<number, number[]>();
-  if (layoutIds.length === 0) return map;
-  const placeholders = layoutIds.map(() => "?").join(", ");
+// Called from routes/terminals.ts when a session is deleted — removes it
+// from every layout in its campaign that still references it, so a pane
+// never shows a dead session id, it just becomes empty and relaunchable.
+export function pruneSessionFromLayouts(db: Database.Database, campaignId: number, sessionId: number): void {
   const rows = db
-    .prepare(
-      `SELECT layout_id, terminal_session_id FROM terminal_layout_members
-       WHERE layout_id IN (${placeholders}) ORDER BY layout_id ASC, position ASC`,
-    )
-    .all(...layoutIds) as MemberRow[];
-  for (const r of rows) {
-    const list = map.get(r.layout_id) ?? [];
-    list.push(r.terminal_session_id);
-    map.set(r.layout_id, list);
+    .prepare("SELECT * FROM terminal_layouts WHERE campaign_id = ?")
+    .all(campaignId) as TerminalLayoutRow[];
+  const update = db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?");
+  for (const row of rows) {
+    const tree = JSON.parse(row.layout_tree) as PaneNode;
+    if (!sessionIdsInTree(tree).includes(sessionId)) continue;
+    update.run(JSON.stringify(remapSessionIds(tree, new Map([[sessionId, null]]))), row.id);
   }
-  return map;
-}
-
-// Replaces a layout's membership atomically — the grid is edited as "here is
-// the new full set of sessions", not incrementally, so a delete-then-reinsert
-// inside one transaction is simpler and avoids reordering bugs.
-function setMembers(db: Database.Database, layoutId: number, sessionIds: number[]): void {
-  const tx = db.transaction((ids: number[]) => {
-    db.prepare("DELETE FROM terminal_layout_members WHERE layout_id = ?").run(layoutId);
-    const insert = db.prepare(
-      "INSERT INTO terminal_layout_members (layout_id, terminal_session_id, position) VALUES (?, ?, ?)",
-    );
-    ids.forEach((sessionId, position) => insert.run(layoutId, sessionId, position));
-  });
-  tx(sessionIds);
 }
 
 export function registerLayoutRoutes(app: FastifyInstance, db: Database.Database) {
@@ -67,14 +49,13 @@ export function registerLayoutRoutes(app: FastifyInstance, db: Database.Database
       const rows = db
         .prepare("SELECT * FROM terminal_layouts WHERE campaign_id = ? ORDER BY id ASC")
         .all(req.params.campaignId) as TerminalLayoutRow[];
-      const members = memberIdsByLayout(db, rows.map((r) => r.id));
-      return rows.map((r) => toLayout(r, members.get(r.id) ?? []));
+      return rows.map(toLayout);
     },
   );
 
   app.post<{
     Params: { campaignId: string };
-    Body: { name?: string; sessionIds?: number[] };
+    Body: { name?: string; tree?: PaneNode };
   }>("/campaigns/:campaignId/layouts", async (req, reply) => {
     const campaign = db.prepare("SELECT id FROM campaigns WHERE id = ?").get(req.params.campaignId);
     if (!campaign) {
@@ -86,22 +67,23 @@ export function registerLayoutRoutes(app: FastifyInstance, db: Database.Database
       reply.code(400);
       return { error: "name is required" };
     }
-    const sessionIds = req.body?.sessionIds ?? [];
+    const tree = req.body?.tree ?? emptyTree();
 
     const info = db
-      .prepare("INSERT INTO terminal_layouts (campaign_id, name, created_at) VALUES (?, ?, ?)")
-      .run(req.params.campaignId, name, new Date().toISOString());
-    const layoutId = Number(info.lastInsertRowid);
-    setMembers(db, layoutId, sessionIds);
-
-    const row = db.prepare("SELECT * FROM terminal_layouts WHERE id = ?").get(layoutId) as TerminalLayoutRow;
+      .prepare(
+        "INSERT INTO terminal_layouts (campaign_id, name, created_at, layout_tree, is_name_custom) VALUES (?, ?, ?, ?, 0)",
+      )
+      .run(req.params.campaignId, name, new Date().toISOString(), JSON.stringify(tree));
+    const row = db
+      .prepare("SELECT * FROM terminal_layouts WHERE id = ?")
+      .get(info.lastInsertRowid) as TerminalLayoutRow;
     reply.code(201);
-    return toLayout(row, sessionIds);
+    return toLayout(row);
   });
 
   app.patch<{
     Params: { id: string };
-    Body: Partial<{ name: string; sessionIds: number[] }>;
+    Body: Partial<{ name: string; isNameCustom: boolean; tree: PaneNode }>;
   }>("/layouts/:id", async (req, reply) => {
     const layout = db.prepare("SELECT * FROM terminal_layouts WHERE id = ?").get(req.params.id) as
       | TerminalLayoutRow
@@ -119,13 +101,21 @@ export function registerLayoutRoutes(app: FastifyInstance, db: Database.Database
       }
       db.prepare("UPDATE terminal_layouts SET name = ? WHERE id = ?").run(body.name.trim(), layout.id);
     }
-    if (body.sessionIds !== undefined) {
-      setMembers(db, layout.id, body.sessionIds);
+    if (body.isNameCustom !== undefined) {
+      db.prepare("UPDATE terminal_layouts SET is_name_custom = ? WHERE id = ?").run(
+        body.isNameCustom ? 1 : 0,
+        layout.id,
+      );
+    }
+    if (body.tree !== undefined) {
+      db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?").run(
+        JSON.stringify(body.tree),
+        layout.id,
+      );
     }
 
     const updated = db.prepare("SELECT * FROM terminal_layouts WHERE id = ?").get(layout.id) as TerminalLayoutRow;
-    const members = memberIdsByLayout(db, [layout.id]);
-    return toLayout(updated, members.get(layout.id) ?? []);
+    return toLayout(updated);
   });
 
   app.delete<{ Params: { id: string } }>("/layouts/:id", async (req, reply) => {
