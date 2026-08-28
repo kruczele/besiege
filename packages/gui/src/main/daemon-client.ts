@@ -10,6 +10,7 @@ import type {
   DaemonHealth,
   FailureSignature,
   Notification,
+  PaneNode,
   Pr,
   PrClaim,
   PrGridRow,
@@ -221,19 +222,32 @@ export const deleteTerminal = (id: number) => callDaemon<void>("DELETE", `/termi
 
 // Agent adapters
 export const fetchAgentAdapters = () => callDaemon<AgentAdapter[]>("GET", "/agents");
-export const createAgentAdapter = (name: string, binary: string, yoloFlag?: string, mcpConfigFlag?: string) =>
-  callDaemon<AgentAdapter>("POST", "/agents", { name, binary, yoloFlag, mcpConfigFlag });
+export const createAgentAdapter = (
+  name: string,
+  binary: string,
+  yoloFlag?: string,
+  mcpConfigFlag?: string,
+  sessionIdFlag?: string,
+  resumeFlag?: string,
+) => callDaemon<AgentAdapter>("POST", "/agents", { name, binary, yoloFlag, mcpConfigFlag, sessionIdFlag, resumeFlag });
 export const updateAgentAdapter = (
   id: number,
-  fields: Partial<{ name: string; binary: string; yoloFlag: string; mcpConfigFlag: string }>,
+  fields: Partial<{
+    name: string;
+    binary: string;
+    yoloFlag: string;
+    mcpConfigFlag: string;
+    sessionIdFlag: string;
+    resumeFlag: string;
+  }>,
 ) => callDaemon<AgentAdapter>("PATCH", `/agents/${id}`, fields);
 export const deleteAgentAdapter = (id: number) => callDaemon<void>("DELETE", `/agents/${id}`);
 
-// Terminal layouts ("meta-tabs": a saved grid of sessions shown together)
+// Terminal layouts ("tabs": a saved split-pane grid of sessions)
 export const fetchLayouts = (campaignId: number) =>
   callDaemon<TerminalLayout[]>("GET", `/campaigns/${campaignId}/layouts`);
-export const createLayout = (campaignId: number, name: string, sessionIds: number[]) =>
-  callDaemon<TerminalLayout>("POST", `/campaigns/${campaignId}/layouts`, { name, sessionIds });
-export const updateLayout = (id: number, fields: Partial<{ name: string; sessionIds: number[] }>) =>
+export const createLayout = (campaignId: number, name: string, tree: PaneNode) =>
+  callDaemon<TerminalLayout>("POST", `/campaigns/${campaignId}/layouts`, { name, tree });
+export const updateLayout = (id: number, fields: Partial<{ name: string; isNameCustom: boolean; tree: PaneNode }>) =>
   callDaemon<TerminalLayout>("PATCH", `/layouts/${id}`, fields);
 export const deleteLayout = (id: number) => callDaemon<void>("DELETE", `/layouts/${id}`);

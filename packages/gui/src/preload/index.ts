@@ -8,6 +8,7 @@ import type {
   DaemonHealth,
   DaemonResult,
   Notification,
+  PaneNode,
   PrGridRow,
   TerminalLayout,
   TerminalSession,
@@ -74,21 +75,30 @@ const api = {
     binary: string,
     yoloFlag: string | undefined,
     mcpConfigFlag: string | undefined,
+    sessionIdFlag: string | undefined,
+    resumeFlag: string | undefined,
   ): Promise<DaemonResult<AgentAdapter>> =>
-    ipcRenderer.invoke("agents:create", name, binary, yoloFlag, mcpConfigFlag),
+    ipcRenderer.invoke("agents:create", name, binary, yoloFlag, mcpConfigFlag, sessionIdFlag, resumeFlag),
   updateAgentAdapter: (
     id: number,
-    fields: Partial<{ name: string; binary: string; yoloFlag: string; mcpConfigFlag: string }>,
+    fields: Partial<{
+      name: string;
+      binary: string;
+      yoloFlag: string;
+      mcpConfigFlag: string;
+      sessionIdFlag: string;
+      resumeFlag: string;
+    }>,
   ): Promise<DaemonResult<AgentAdapter>> => ipcRenderer.invoke("agents:update", id, fields),
   deleteAgentAdapter: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("agents:delete", id),
 
   listLayouts: (campaignId: number): Promise<DaemonResult<TerminalLayout[]>> =>
     ipcRenderer.invoke("layouts:list", campaignId),
-  createLayout: (campaignId: number, name: string, sessionIds: number[]): Promise<DaemonResult<TerminalLayout>> =>
-    ipcRenderer.invoke("layouts:create", campaignId, name, sessionIds),
+  createLayout: (campaignId: number, name: string, tree: PaneNode): Promise<DaemonResult<TerminalLayout>> =>
+    ipcRenderer.invoke("layouts:create", campaignId, name, tree),
   updateLayout: (
     id: number,
-    fields: Partial<{ name: string; sessionIds: number[] }>,
+    fields: Partial<{ name: string; isNameCustom: boolean; tree: PaneNode }>,
   ): Promise<DaemonResult<TerminalLayout>> => ipcRenderer.invoke("layouts:update", id, fields),
   deleteLayout: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("layouts:delete", id),
 

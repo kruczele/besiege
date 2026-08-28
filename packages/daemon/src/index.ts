@@ -3,7 +3,8 @@ import { openDb } from "./db.js";
 import { buildServer } from "./server.js";
 import { dbPath, pidPath, socketPath, stateDir } from "./paths.js";
 import { getGitHubToken, syncAllActivePrs, syncPr, syncCampaign, expireStaleClaims } from "./github.js";
-import { killAllLiveSessions, reapStaleSessionsOnBoot } from "./terminals.js";
+import { killAllLiveSessions, resumeSessionsOnBoot } from "./terminals.js";
+import { remapSessionIds, sessionIdsInTree, type PaneNode } from "./layout-tree.js";
 
 function processIsAlive(pid: number): boolean {
   try {
@@ -36,9 +37,23 @@ async function main() {
 
   const db = openDb();
   db.prepare("INSERT INTO daemon_startups (started_at) VALUES (?)").run(new Date().toISOString());
-  // No PTY can survive a daemon restart — any row still marked 'active' from
-  // a previous process is stale by definition.
-  reapStaleSessionsOnBoot(db);
+
+  const resumeIdMap = resumeSessionsOnBoot(db);
+  if (resumeIdMap.size > 0) {
+    // Point every pane that referenced a now-stale session at whatever
+    // resumeSessionsOnBoot did with it: the resumed session's new id, or
+    // null (empty, relaunchable pane) if it couldn't be resumed.
+    const layoutRows = db.prepare("SELECT id, layout_tree FROM terminal_layouts").all() as {
+      id: number;
+      layout_tree: string;
+    }[];
+    const updateTree = db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?");
+    for (const row of layoutRows) {
+      const tree = JSON.parse(row.layout_tree) as PaneNode;
+      if (!sessionIdsInTree(tree).some((id) => resumeIdMap.has(id))) continue;
+      updateTree.run(JSON.stringify(remapSessionIds(tree, resumeIdMap)), row.id);
+    }
+  }
 
   const token = getGitHubToken();
   const app = await buildServer(db, token ? syncPr : null, token ? syncCampaign : null);

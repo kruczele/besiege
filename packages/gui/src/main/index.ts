@@ -31,6 +31,7 @@ import {
   updateLayout,
 } from "./daemon-client.js";
 import * as terminalBridge from "./terminal-bridge.js";
+import type { PaneNode } from "../shared/types.js";
 
 const icon = nativeImage.createFromPath(join(__dirname, "../../resources/icon.png"));
 
@@ -169,15 +170,21 @@ daemonHandle("terminals:delete", (id: number) => deleteTerminal(id));
 daemonHandle("agents:list", fetchAgentAdapters);
 daemonHandle(
   "agents:create",
-  (name: string, binary: string, yoloFlag: string | undefined, mcpConfigFlag: string | undefined) =>
-    createAgentAdapter(name, binary, yoloFlag, mcpConfigFlag),
+  (
+    name: string,
+    binary: string,
+    yoloFlag: string | undefined,
+    mcpConfigFlag: string | undefined,
+    sessionIdFlag: string | undefined,
+    resumeFlag: string | undefined,
+  ) => createAgentAdapter(name, binary, yoloFlag, mcpConfigFlag, sessionIdFlag, resumeFlag),
 );
 daemonHandle("agents:update", (id: number, fields: Record<string, unknown>) => updateAgentAdapter(id, fields));
 daemonHandle("agents:delete", (id: number) => deleteAgentAdapter(id));
 
 daemonHandle("layouts:list", (campaignId: number) => fetchLayouts(campaignId));
-daemonHandle("layouts:create", (campaignId: number, name: string, sessionIds: number[]) =>
-  createLayout(campaignId, name, sessionIds),
+daemonHandle("layouts:create", (campaignId: number, name: string, tree: PaneNode) =>
+  createLayout(campaignId, name, tree),
 );
 daemonHandle("layouts:update", (id: number, fields: Record<string, unknown>) => updateLayout(id, fields));
 daemonHandle("layouts:delete", (id: number) => deleteLayout(id));

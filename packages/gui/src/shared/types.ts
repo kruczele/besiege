@@ -60,15 +60,41 @@ export interface AgentAdapter {
   binary: string;
   yoloFlag: string | null;
   mcpConfigFlag: string | null;
+  sessionIdFlag: string | null;
+  resumeFlag: string | null;
   createdAt: string;
 }
+
+// A pane grid is an arbitrary tmux-style binary split tree rather than a
+// flat, fixed-size square grid: a leaf is one pane (empty, or holding a
+// terminal session); a split is a row/col division of two child nodes at a
+// given ratio. Mirrored (duplicated, not shared — different runtimes) in
+// packages/daemon/src/layout-tree.ts, which owns the authoritative pure
+// tree-manipulation functions server-side.
+export interface PaneLeaf {
+  type: "leaf";
+  id: string;
+  sessionId: number | null;
+}
+
+export interface PaneSplit {
+  type: "split";
+  id: string;
+  dir: "row" | "col";
+  ratio: number;
+  a: PaneNode;
+  b: PaneNode;
+}
+
+export type PaneNode = PaneLeaf | PaneSplit;
 
 export interface TerminalLayout {
   id: number;
   campaignId: number;
   name: string;
   createdAt: string;
-  sessionIds: number[];
+  isNameCustom: boolean;
+  tree: PaneNode;
 }
 
 export interface CampaignStep {
