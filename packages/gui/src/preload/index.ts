@@ -79,10 +79,22 @@ const api = {
     agentAdapterId: number | undefined,
     yolo: boolean | undefined,
     extraArgs: string | undefined,
+    resumeFromTerminalId: number | undefined,
   ): Promise<DaemonResult<TerminalSession>> =>
-    ipcRenderer.invoke("terminals:create", campaignId, cwd, label, agentAdapterId, yolo, extraArgs),
+    ipcRenderer.invoke(
+      "terminals:create",
+      campaignId,
+      cwd,
+      label,
+      agentAdapterId,
+      yolo,
+      extraArgs,
+      resumeFromTerminalId,
+    ),
   killTerminal: (id: number): Promise<DaemonResult<{ ok: boolean }>> =>
     ipcRenderer.invoke("terminals:kill", id),
+  getTerminalByAgentSession: (agentSessionId: string): Promise<DaemonResult<TerminalSession>> =>
+    ipcRenderer.invoke("terminals:byAgentSession", agentSessionId),
   deleteTerminal: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("terminals:delete", id),
 
   listAgentAdapters: (): Promise<DaemonResult<AgentAdapter[]>> => ipcRenderer.invoke("agents:list"),

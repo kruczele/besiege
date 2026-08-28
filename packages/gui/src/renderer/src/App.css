@@ -258,30 +258,51 @@ h1 {
   color: #6c86ff;
 }
 
-.notification-list li {
+.notification-card {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.4rem;
   background: #1b1e27;
   border: 1px solid #2a2e38;
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
 }
 
-.notification-list li.acked {
+.notification-card.acked {
   opacity: 0.5;
 }
 
 .n-message {
-  margin: 0 0 0.2rem;
-  font-size: 0.9rem;
+  margin: 0;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.n-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .n-meta {
-  margin: 0;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: #9ba1b0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.n-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.n-actions button {
+  align-self: auto;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
 }
 
 .toggle {
@@ -470,8 +491,7 @@ h1 {
   letter-spacing: 0.06em;
 }
 
-.claim-list,
-.live-notif-list {
+.claim-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -557,6 +577,24 @@ h1 {
   min-height: 0;
   overflow: hidden;
   padding: 0.5rem;
+}
+
+.inbox-section {
+  flex-shrink: 0;
+  max-height: 13rem;
+  overflow-y: auto;
+  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid #2a2e38;
+}
+
+.inbox-section h2 {
+  font-size: 0.78rem;
+  color: #9ba1b0;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .sidebar-footer {

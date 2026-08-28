@@ -11,13 +11,14 @@ import type {
   Notification,
   PrGridRow,
   TaskDefinition,
+  TerminalSession,
 } from "../../shared/types.js";
 import { TerminalsMain } from "./Terminals.js";
 
 const POLL_FAST = 3000;
 const POLL_GRID = 5000;
 
-type Tab = "campaigns" | "live" | "rules" | "agents" | "inbox";
+type Tab = "campaigns" | "live" | "rules" | "agents";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("campaigns");
@@ -26,6 +27,14 @@ export function App() {
   // belongs to. Terminals are children of campaigns, so there's one shared
   // notion of "current campaign" across the sidebar and the terminal area.
   const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
+  // Set by "Jump to agent" (Inbox, Live tab) — see TerminalsMain's
+  // focusRequest prop for how the terminal area resolves this into an
+  // actual tab/pane selection once that campaign's grid has loaded.
+  const [focusRequest, setFocusRequest] = useState<{ campaignId: number; terminalId: number } | null>(null);
+  const jumpToSession = (campaignId: number, terminalId: number) => {
+    setActiveCampaignId(campaignId);
+    setFocusRequest({ campaignId, terminalId });
+  };
 
   // No application menu (frame: false, no visible menu bar) supplies the
   // conventional Ctrl/Cmd +/- zoom accelerators, so handle them here.
@@ -54,7 +63,7 @@ export function App() {
         <aside className="sidebar">
           <h1>Besiege</h1>
           <nav className="tabs">
-            {(["campaigns", "live", "rules", "agents", "inbox"] as Tab[]).map((t) => (
+            {(["campaigns", "live", "rules", "agents"] as Tab[]).map((t) => (
               <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
@@ -64,17 +73,21 @@ export function App() {
             {tab === "campaigns" && (
               <CampaignsPanel activeCampaignId={activeCampaignId} onSelectCampaign={setActiveCampaignId} />
             )}
-            {tab === "live" && <LivePanel />}
+            {tab === "live" && <LivePanel onJump={jumpToSession} />}
             {tab === "rules" && <RulesPanel />}
             {tab === "agents" && <AgentsPanel />}
-            {tab === "inbox" && <InboxPanel />}
           </div>
+          <InboxPanel onJump={jumpToSession} />
           <div className="sidebar-footer">
             <StatusPanel />
           </div>
         </aside>
         <main className="main">
-          <TerminalsMain campaignId={activeCampaignId} />
+          <TerminalsMain
+            campaignId={activeCampaignId}
+            focusRequest={focusRequest}
+            onFocusHandled={() => setFocusRequest(null)}
+          />
         </main>
       </div>
     </div>
@@ -500,12 +513,70 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
   );
 }
 
+// ── Notifications (shared by the always-visible Inbox and the Live board) ──────
+
+// A notification only carries the raw BESIEGE_SESSION_ID string of whoever
+// raised it — this resolves that to the terminal session that owns it (if
+// any), so the UI can show something meaningful instead of a bare id, and
+// offer a way to jump straight to it. Cached across notifications, since the
+// same session commonly raises more than one.
+function useSessionLookup(sessionIds: string[]): Record<string, TerminalSession | null> {
+  const [cache, setCache] = useState<Record<string, TerminalSession | null>>({});
+
+  useEffect(() => {
+    const missing = sessionIds.filter((id) => !(id in cache));
+    for (const id of missing) {
+      window.api.getTerminalByAgentSession(id).then((res) => {
+        setCache((prev) => (id in prev ? prev : { ...prev, [id]: res.ok ? res.result : null }));
+      });
+    }
+    // Re-run only when the *set* of ids changes, not when `cache` fills in —
+    // otherwise every resolved id would immediately re-trigger this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionIds.join(",")]);
+
+  return cache;
+}
+
+// Message and meta/actions are deliberately separate rows — cramming a
+// multi-line message next to a button in one flex row is what made this
+// unreadable before.
+function NotificationCard({
+  notification,
+  session,
+  onAck,
+  onJump,
+}: {
+  notification: Notification;
+  session: TerminalSession | null | undefined;
+  onAck: (id: number) => void;
+  onJump: (campaignId: number, terminalId: number) => void;
+}) {
+  const title = session ? (session.label ?? session.agentName ?? `Terminal #${session.id}`) : null;
+
+  return (
+    <li className={`notification-card ${notification.acknowledgedAt ? "acked" : ""}`}>
+      <p className="n-message">{notification.message}</p>
+      <div className="n-meta-row">
+        <span className="n-meta">
+          {title ?? notification.cwd ?? "unknown session"} · {elapsed(notification.createdAt)} ago
+        </span>
+        <div className="n-actions">
+          {session && <button onClick={() => onJump(session.campaignId, session.id)}>Jump to agent</button>}
+          {!notification.acknowledgedAt && <button onClick={() => onAck(notification.id)}>Acknowledge</button>}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 // ── Live board ────────────────────────────────────────────────────────────────
 
-function LivePanel() {
+function LivePanel({ onJump }: { onJump: (campaignId: number, terminalId: number) => void }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [claims, setClaims] = useState<ActiveClaim[]>([]);
+  const [runningAgents, setRunningAgents] = useState<TerminalSession[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
@@ -522,13 +593,20 @@ function LivePanel() {
     let cancelled = false;
 
     const poll = async () => {
-      const [claimsRes, notifRes] = await Promise.all([
+      const [claimsRes, notifRes, terminalsRes] = await Promise.all([
         window.api.listCampaignClaims(selectedId),
         window.api.listNotifications(true),
+        window.api.listTerminals(selectedId),
       ]);
       if (cancelled) return;
       if (claimsRes.ok) setClaims(claimsRes.result);
       if (notifRes.ok) setNotifications(notifRes.result);
+      // Shows up here purely from being spawned with an agent adapter — no
+      // claim required, so a pane-launched agent is visible immediately
+      // instead of only after (if ever) it calls the claim_pr MCP tool.
+      if (terminalsRes.ok) {
+        setRunningAgents(terminalsRes.result.filter((s) => s.status === "active" && s.agentAdapterId !== null));
+      }
     };
 
     poll();
@@ -538,6 +616,8 @@ function LivePanel() {
       clearInterval(id);
     };
   }, [selectedId]);
+
+  const sessionsForNotifications = useSessionLookup(notifications.map((n) => n.sessionId));
 
   const ack = async (id: number) => {
     await window.api.acknowledgeNotification(id);
@@ -563,12 +643,12 @@ function LivePanel() {
       <div className="live-board">
         <div className="live-section">
           <h2>Active agents</h2>
-          {claims.length === 0 ? (
+          {claims.length === 0 && runningAgents.length === 0 ? (
             <p className="empty-hint">No agents running.</p>
           ) : (
             <ul className="claim-list">
               {claims.map((c) => (
-                <li key={c.id} className="claim-card">
+                <li key={`claim-${c.id}`} className="claim-card">
                   <div className="c-repo">{c.repoName}</div>
                   <div className="c-step">
                     {c.stepName} · {c.lifecycle}
@@ -582,6 +662,18 @@ function LivePanel() {
                   </div>
                 </li>
               ))}
+              {/* Running from a pane launch, not (yet, or ever) claiming a
+                  specific PR — shown purely because the process is alive, no
+                  cooperation from the agent required. May overlap with a
+                  claim above once/if it does self-claim; not worth
+                  correlating the two just to de-duplicate. */}
+              {runningAgents.map((s) => (
+                <li key={`session-${s.id}`} className="claim-card">
+                  <div className="c-repo">{s.agentName}</div>
+                  <div className="c-step">{s.cwd}</div>
+                  <div className="c-agent">running · {elapsed(s.createdAt)}</div>
+                </li>
+              ))}
             </ul>
           )}
         </div>
@@ -590,18 +682,15 @@ function LivePanel() {
           {notifications.length === 0 ? (
             <p className="empty-hint">Nothing waiting.</p>
           ) : (
-            <ul className="live-notif-list notification-list">
+            <ul className="notification-list">
               {notifications.map((n) => (
-                <li key={n.id}>
-                  <div>
-                    <p className="n-message">{n.message}</p>
-                    <p className="n-meta">
-                      {n.sessionId}
-                      {n.cwd && ` · ${n.cwd}`}
-                    </p>
-                  </div>
-                  <button onClick={() => ack(n.id)}>Acknowledge</button>
-                </li>
+                <NotificationCard
+                  key={n.id}
+                  notification={n}
+                  session={sessionsForNotifications[n.sessionId]}
+                  onAck={ack}
+                  onJump={onJump}
+                />
               ))}
             </ul>
           )}
@@ -931,14 +1020,15 @@ function AgentsPanel() {
 
 // ── Inbox ─────────────────────────────────────────────────────────────────────
 
-function InboxPanel() {
-  const [unacknowledgedOnly, setUnacknowledgedOnly] = useState(true);
-  const [notifications, setNotifications] = useState<Notification[] | null>(null);
+// Always visible below whichever sidebar tab is active — not a tab itself,
+// so it can't be navigated away from and forgotten about.
+function InboxPanel({ onJump }: { onJump: (campaignId: number, terminalId: number) => void }) {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
-      const res = await window.api.listNotifications(unacknowledgedOnly);
+      const res = await window.api.listNotifications(true);
       if (!cancelled && res.ok) setNotifications(res.result);
     };
     poll();
@@ -947,42 +1037,28 @@ function InboxPanel() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [unacknowledgedOnly]);
+  }, []);
+
+  const sessions = useSessionLookup(notifications.map((n) => n.sessionId));
 
   const ack = async (id: number) => {
     await window.api.acknowledgeNotification(id);
-    const res = await window.api.listNotifications(unacknowledgedOnly);
+    const res = await window.api.listNotifications(true);
     if (res.ok) setNotifications(res.result);
   };
 
   return (
-    <div className="panel">
-      <label className="toggle">
-        <input
-          type="checkbox"
-          checked={unacknowledgedOnly}
-          onChange={(e) => setUnacknowledgedOnly(e.target.checked)}
-        />
-        Unacknowledged only
-      </label>
-      {notifications === null && <p className="status status-pending">Loading…</p>}
-      {notifications?.length === 0 && (
-        <p className="status status-pending">Nothing waiting on you.</p>
+    <div className="inbox-section">
+      <h2>Inbox</h2>
+      {notifications.length === 0 ? (
+        <p className="empty-hint">Nothing waiting on you.</p>
+      ) : (
+        <ul className="notification-list">
+          {notifications.map((n) => (
+            <NotificationCard key={n.id} notification={n} session={sessions[n.sessionId]} onAck={ack} onJump={onJump} />
+          ))}
+        </ul>
       )}
-      <ul className="notification-list">
-        {notifications?.map((n) => (
-          <li key={n.id} className={n.acknowledgedAt ? "acked" : ""}>
-            <div>
-              <p className="n-message">{n.message}</p>
-              <p className="n-meta">
-                {n.sessionId}
-                {n.cwd && <> · {n.cwd}</>} · {n.createdAt}
-              </p>
-            </div>
-            {!n.acknowledgedAt && <button onClick={() => ack(n.id)}>Acknowledge</button>}
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

@@ -24,6 +24,7 @@ import {
   fetchNotifications,
   fetchSteps,
   fetchTasks,
+  getTerminalByAgentSession,
   killTerminal,
   listTerminals,
   releasePrClaim,
@@ -178,9 +179,11 @@ daemonHandle(
     agentAdapterId: number | undefined,
     yolo: boolean | undefined,
     extraArgs: string | undefined,
-  ) => createTerminal(campaignId, cwd, label, agentAdapterId, yolo, extraArgs),
+    resumeFromTerminalId: number | undefined,
+  ) => createTerminal(campaignId, cwd, label, agentAdapterId, yolo, extraArgs, resumeFromTerminalId),
 );
 daemonHandle("terminals:kill", (id: number) => killTerminal(id));
+daemonHandle("terminals:byAgentSession", (agentSessionId: string) => getTerminalByAgentSession(agentSessionId));
 daemonHandle("terminals:delete", (id: number) => deleteTerminal(id));
 
 daemonHandle("agents:list", fetchAgentAdapters);

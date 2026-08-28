@@ -9,6 +9,7 @@ import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { getJson, postJson, deleteJson } from "./hooks/client.js";
+import { stripInheritedAgentEnv } from "./env.js";
 
 interface CampaignRepo {
   id: number;
@@ -164,7 +165,7 @@ async function dispatch(opts: {
     cwd,
     stdio: "inherit",
     env: {
-      ...process.env,
+      ...stripInheritedAgentEnv(process.env),
       // Propagate campaign/step/PR context so the SessionStart hook and MCP
       // tools have it available without needing flags on every call.
       BESIEGE_CAMPAIGN_ID: campaignId,

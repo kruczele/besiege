@@ -52,6 +52,7 @@ export interface TerminalSession {
   agentName: string | null;
   yolo: boolean;
   extraArgs: string | null;
+  agentSessionId: string | null;
 }
 
 export interface AgentAdapter {

@@ -46,7 +46,24 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
     // Reserved pane-split/navigation combos must never reach the shell —
     // returning false here stops xterm from handling (and writing) them,
     // and the keydown event still bubbles to the window-level listener.
-    term.attachCustomKeyEventHandler((e) => matchShortcut(e) === null);
+    // Ctrl+Shift+C is handled the same way, as an explicit copy shortcut
+    // alongside the copy-on-select below (xterm has no clipboard integration
+    // of its own — selecting text here otherwise does nothing).
+    term.attachCustomKeyEventHandler((e) => {
+      if (matchShortcut(e) !== null) return false;
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
+        const selection = term.getSelection();
+        if (selection) void navigator.clipboard.writeText(selection).catch(() => {});
+        return false;
+      }
+      return true;
+    });
+    // Copy-on-select, like most terminal emulators — no explicit action
+    // needed, selecting text is enough.
+    const selectionSub = term.onSelectionChange(() => {
+      const selection = term.getSelection();
+      if (selection) void navigator.clipboard.writeText(selection).catch(() => {});
+    });
 
     let disposed = false;
     const dataSub = term.onData((data) => {
@@ -82,6 +99,7 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
       resizeObserver.disconnect();
       dataSub.dispose();
       titleSub.dispose();
+      selectionSub.dispose();
       unsubscribe();
       window.api.closeTerminalStream(id);
       term.dispose();
@@ -96,15 +114,28 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
 function PaneLauncher({
   adapters,
   onLaunch,
+  resume,
 }: {
   adapters: AgentAdapter[];
   onLaunch: (adapterId: number | undefined, yolo: boolean, extraArgs: string) => void;
+  // Present when this pane's previous occupant exited but left behind a
+  // resumable agent conversation (resume_flag + agent_session_id) — offers
+  // continuing it instead of only falling back to a fresh shell/agent.
+  resume?: { agentName: string; onResume: () => void };
 }) {
   const [yolo, setYolo] = useState(false);
   const [extraArgs, setExtraArgs] = useState("");
 
   return (
     <div className="pane-launcher">
+      {resume && (
+        <div className="pane-launcher-resume">
+          <button className="pane-launcher-resume-btn" onClick={resume.onResume}>
+            Resume {resume.agentName}
+          </button>
+          <span className="pane-launcher-resume-hint">or start something new:</span>
+        </div>
+      )}
       <div className="pane-launcher-options">
         <input
           className="pane-launcher-args"
@@ -147,6 +178,7 @@ function PaneView({
   onSplit,
   onClosePane,
   onLaunch,
+  onResume,
   onRatioChange,
   onRatioCommit,
 }: {
@@ -160,6 +192,7 @@ function PaneView({
   onSplit: (paneId: string, dir: "row" | "col") => void;
   onClosePane: (paneId: string, sessionId?: number) => void;
   onLaunch: (paneId: string, adapterId: number | undefined, yolo: boolean, extraArgs: string) => void;
+  onResume: (paneId: string, terminalId: number) => void;
   onRatioChange: (splitId: string, ratio: number) => void;
   onRatioCommit: (splitId: string, ratio: number) => void;
 }) {
@@ -176,6 +209,7 @@ function PaneView({
         onSplit={onSplit}
         onClosePane={onClosePane}
         onLaunch={onLaunch}
+        onResume={onResume}
         onRatioChange={onRatioChange}
         onRatioCommit={onRatioCommit}
       />
@@ -184,6 +218,9 @@ function PaneView({
 
   const session = node.sessionId !== null ? sessions.find((s) => s.id === node.sessionId) : undefined;
   const isActive = activePaneId === node.id;
+  const isExited = session?.status === "exited";
+  const adapter = session?.agentAdapterId != null ? adapters.find((a) => a.id === session.agentAdapterId) : undefined;
+  const canResume = isExited && adapter?.resumeFlag != null && session?.agentSessionId != null;
 
   return (
     <div className={`terminal-grid-pane ${isActive ? "active" : ""}`} onMouseDownCapture={() => onActivate(node.id)}>
@@ -194,7 +231,7 @@ function PaneView({
       ) : (
         <>
           <div className="terminal-grid-pane-header">
-            <span className={`terminal-grid-pane-title ${session.status === "exited" ? "exited" : ""}`}>
+            <span className={`terminal-grid-pane-title ${isExited ? "exited" : ""}`}>
               {titles[session.id] ?? session.label ?? `Terminal #${session.id}`}
             </span>
             <div className="terminal-grid-pane-actions">
@@ -209,7 +246,18 @@ function PaneView({
               </button>
             </div>
           </div>
-          <TerminalView id={session.id} onTitle={(title) => onTitle(session.id, title)} />
+          {isExited ? (
+            // Falls back to a fresh launcher instead of sitting on a dead,
+            // uninteractive terminal — with an option to pick up the same
+            // agent conversation again when it's resumable.
+            <PaneLauncher
+              adapters={adapters}
+              onLaunch={(adapterId, yolo, extraArgs) => onLaunch(node.id, adapterId, yolo, extraArgs)}
+              resume={canResume ? { agentName: adapter!.name, onResume: () => onResume(node.id, session.id) } : undefined}
+            />
+          ) : (
+            <TerminalView id={session.id} onTitle={(title) => onTitle(session.id, title)} />
+          )}
         </>
       )}
     </div>
@@ -256,7 +304,19 @@ function PaneSplitView(props: Parameters<typeof PaneView>[0] & { node: Extract<P
   );
 }
 
-export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
+export function TerminalsMain({
+  campaignId,
+  focusRequest,
+  onFocusHandled,
+}: {
+  campaignId: number | null;
+  // Set by App (e.g. "Jump to agent" from the Inbox) to ask this campaign's
+  // grid to switch to whichever tab/pane holds this terminal session, once
+  // it's actually loaded. Cleared via onFocusHandled once acted on so it
+  // doesn't keep re-triggering.
+  focusRequest?: { campaignId: number; terminalId: number } | null;
+  onFocusHandled?: () => void;
+}) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [titles, setTitles] = useState<Record<number, string>>({});
@@ -397,6 +457,30 @@ export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
       adapterId,
       adapterId ? yolo : undefined,
       adapterId && extraArgs.trim() ? extraArgs.trim() : undefined,
+      undefined,
+    );
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setSessions((prev) => [res.result, ...prev]);
+    persistTree(activeLayout.id, setPaneSession(activeLayout.tree, paneId, res.result.id));
+  };
+
+  // Manual counterpart to the daemon's boot-time auto-resume: relaunches the
+  // same agent conversation (adapter/cwd/yolo/extraArgs all come from the
+  // prior row server-side) from a pane whose agent process has exited.
+  const handleResume = async (paneId: string, terminalId: number) => {
+    if (!activeLayout || campaignId === null) return;
+    setError(null);
+    const res = await window.api.createTerminal(
+      campaignId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      terminalId,
     );
     if (!res.ok) {
       setError(res.error);
@@ -457,6 +541,23 @@ export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
     const res = await window.api.updateLayout(id, { name: value, isNameCustom: true });
     if (res.ok) setLayouts((prev) => prev.map((l) => (l.id === id ? res.result : l)));
   };
+
+  // Resolves a pending "jump to agent" request once this campaign's own
+  // tabs have actually loaded — App sets campaignId first (so this
+  // component even mounts for the right campaign), and this fires again
+  // once `layouts` catches up.
+  useEffect(() => {
+    if (!focusRequest || focusRequest.campaignId !== campaignId) return;
+    for (const layout of layouts) {
+      const leaf = leavesInOrder(layout.tree).find((l) => l.sessionId === focusRequest.terminalId);
+      if (leaf) {
+        setActiveLayoutId(layout.id);
+        setActivePaneId(leaf.id);
+        onFocusHandled?.();
+        return;
+      }
+    }
+  }, [focusRequest, campaignId, layouts, onFocusHandled]);
 
   // Split/cycle shortcuts — TerminalView blocks these from reaching the
   // shell (attachCustomKeyEventHandler above), so they always land here.
@@ -540,6 +641,7 @@ export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
             onSplit={handleSplit}
             onClosePane={handleClosePane}
             onLaunch={handleLaunch}
+            onResume={handleResume}
             onRatioChange={handleRatioChange}
             onRatioCommit={handleRatioCommit}
           />
