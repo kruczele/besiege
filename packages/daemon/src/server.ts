@@ -39,7 +39,7 @@ export async function buildServer(
   registerPrRoutes(app, db, syncPrFn, syncCampaignFn);
   registerFailureRoutes(app, db);
   registerTerminalRoutes(app, db);
-  registerAgentRoutes(app, db);
+  registerAgentRoutes(app);
   registerLayoutRoutes(app, db);
 
   return app;

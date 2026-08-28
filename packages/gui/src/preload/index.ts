@@ -76,7 +76,7 @@ const api = {
     campaignId: number,
     cwd: string | undefined,
     label: string | undefined,
-    agentAdapterId: number | undefined,
+    agentAdapterName: string | undefined,
     yolo: boolean | undefined,
     extraArgs: string | undefined,
     resumeFromTerminalId: number | undefined,
@@ -86,7 +86,7 @@ const api = {
       campaignId,
       cwd,
       label,
-      agentAdapterId,
+      agentAdapterName,
       yolo,
       extraArgs,
       resumeFromTerminalId,
@@ -97,28 +97,8 @@ const api = {
     ipcRenderer.invoke("terminals:byAgentSession", agentSessionId),
   deleteTerminal: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("terminals:delete", id),
 
+  // Agent adapters are a hand-edited YAML config now — read-only from here.
   listAgentAdapters: (): Promise<DaemonResult<AgentAdapter[]>> => ipcRenderer.invoke("agents:list"),
-  createAgentAdapter: (
-    name: string,
-    binary: string,
-    yoloFlag: string | undefined,
-    mcpConfigFlag: string | undefined,
-    sessionIdFlag: string | undefined,
-    resumeFlag: string | undefined,
-  ): Promise<DaemonResult<AgentAdapter>> =>
-    ipcRenderer.invoke("agents:create", name, binary, yoloFlag, mcpConfigFlag, sessionIdFlag, resumeFlag),
-  updateAgentAdapter: (
-    id: number,
-    fields: Partial<{
-      name: string;
-      binary: string;
-      yoloFlag: string;
-      mcpConfigFlag: string;
-      sessionIdFlag: string;
-      resumeFlag: string;
-    }>,
-  ): Promise<DaemonResult<AgentAdapter>> => ipcRenderer.invoke("agents:update", id, fields),
-  deleteAgentAdapter: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("agents:delete", id),
 
   listLayouts: (campaignId: number): Promise<DaemonResult<TerminalLayout[]>> =>
     ipcRenderer.invoke("layouts:list", campaignId),

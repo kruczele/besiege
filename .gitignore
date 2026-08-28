@@ -4,3 +4,4 @@ out/
 *.log
 *.tsbuildinfo
 .state/
+packages/daemon/agents.local.yaml

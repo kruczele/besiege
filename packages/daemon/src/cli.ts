@@ -109,20 +109,22 @@ async function dispatch(opts: {
 }) {
   const { campaignId, stepId, repo, cwd, note, claudeArgs } = opts;
 
-  // 1. Look up the campaign_repo record by name.
+  // 1. Look up the campaign_repo record by name, registering it into the
+  // campaign on the fly if this is the first time it's been dispatched —
+  // requiring it to be pre-registered would defeat the point of a campaign
+  // spanning however many repos turn out to need one.
   const repos = await getJson<CampaignRepo[]>(
     `/campaigns/${campaignId}/repos?name=${encodeURIComponent(repo)}`,
   ).catch(() => null);
 
-  if (!repos || repos.length === 0) {
-    process.stderr.write(
-      `besiege: repo '${repo}' is not registered in campaign ${campaignId}.\n` +
-        `  Register it first: POST /campaigns/${campaignId}/repos { github_full_name: '${repo}' }\n`,
-    );
-    process.exit(1);
-  }
-
-  const repoRecord = repos[0];
+  const repoRecord =
+    repos?.[0] ??
+    (await postJson<CampaignRepo>(`/campaigns/${campaignId}/repos`, { github_full_name: repo }).catch(
+      (err: Error) => {
+        process.stderr.write(`besiege: failed to register repo '${repo}' — ${err.message}\n`);
+        process.exit(1);
+      },
+    ));
 
   // 2. Upsert PR record for (step, repo) — idempotent.
   const pr = await postJson<Pr>("/prs", {

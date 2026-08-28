@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findAgentConfig } from "./agent-config.js";
 import { stripInheritedAgentEnv } from "./env.js";
 import { stateDir } from "./paths.js";
 
@@ -25,20 +26,10 @@ export interface TerminalSessionRow {
   created_at: string;
   exited_at: string | null;
   agent_adapter_id: number | null;
+  agent_adapter_name: string | null;
   yolo: number;
   extra_args: string | null;
   agent_session_id: string | null;
-}
-
-interface AgentAdapterRow {
-  id: number;
-  name: string;
-  binary: string;
-  yolo_flag: string | null;
-  mcp_config_flag: string | null;
-  session_id_flag: string | null;
-  resume_flag: string | null;
-  created_at: string;
 }
 
 // Shared across every session — the besiege MCP server is a single stdio
@@ -126,7 +117,7 @@ export function spawnSession(
   campaignId: number,
   cwd: string,
   label?: string,
-  agentAdapterId?: number,
+  agentAdapterName?: string,
   yolo?: boolean,
   extraArgs?: string,
   // Set only by resumeSessionsOnBoot, continuing a prior agent conversation
@@ -135,33 +126,29 @@ export function spawnSession(
 ): TerminalSessionRow {
   cwd = expandHome(cwd);
 
-  const adapter = agentAdapterId
-    ? (db.prepare("SELECT * FROM agent_adapters WHERE id = ?").get(agentAdapterId) as
-        | AgentAdapterRow
-        | undefined)
-    : undefined;
+  const adapter = agentAdapterName ? findAgentConfig(agentAdapterName) : undefined;
 
   const command = adapter?.binary ?? "zsh";
-  const mcpArgs = adapter?.mcp_config_flag
-    ? splitArgs(adapter.mcp_config_flag).map((token) => token.replace("{path}", ensureMcpConfig()))
+  const mcpArgs = adapter?.mcpConfigFlag
+    ? splitArgs(adapter.mcpConfigFlag).map((token) => token.replace("{path}", ensureMcpConfig()))
     : [];
 
   // A fresh session on an adapter that supports resume gets a pinned id up
   // front, so a later daemon restart has something to pass to resume_flag;
   // a boot-time resume instead reuses the id it's continuing.
-  const agentSessionId = resumeAgentSessionId ?? (adapter?.session_id_flag ? randomUUID() : null);
+  const agentSessionId = resumeAgentSessionId ?? (adapter?.sessionIdFlag ? randomUUID() : null);
   const sessionArgs =
-    resumeAgentSessionId && adapter?.resume_flag
-      ? splitArgs(adapter.resume_flag).map((token) => token.replace("{sessionId}", resumeAgentSessionId))
-      : agentSessionId && adapter?.session_id_flag
-        ? splitArgs(adapter.session_id_flag).map((token) => token.replace("{sessionId}", agentSessionId))
+    resumeAgentSessionId && adapter?.resumeFlag
+      ? splitArgs(adapter.resumeFlag).map((token) => token.replace("{sessionId}", resumeAgentSessionId))
+      : agentSessionId && adapter?.sessionIdFlag
+        ? splitArgs(adapter.sessionIdFlag).map((token) => token.replace("{sessionId}", agentSessionId))
         : [];
 
   const argv = adapter
     ? [
         ...mcpArgs,
         ...sessionArgs,
-        ...(yolo && adapter.yolo_flag ? [adapter.yolo_flag] : []),
+        ...(yolo && adapter.yoloFlag ? [adapter.yoloFlag] : []),
         ...(extraArgs ? splitArgs(extraArgs) : []),
       ]
     : [];
@@ -187,7 +174,7 @@ export function spawnSession(
   const createdAt = new Date().toISOString();
   const info = db
     .prepare(
-      "INSERT INTO terminal_sessions (campaign_id, label, cwd, pid, status, created_at, agent_adapter_id, yolo, extra_args, agent_session_id) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)",
+      "INSERT INTO terminal_sessions (campaign_id, label, cwd, pid, status, created_at, agent_adapter_name, yolo, extra_args, agent_session_id) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)",
     )
     .run(
       campaignId,
@@ -195,7 +182,7 @@ export function spawnSession(
       cwd,
       proc.pid,
       createdAt,
-      adapter?.id ?? null,
+      adapter?.name ?? null,
       yolo && adapter ? 1 : 0,
       adapter && extraArgs?.trim() ? extraArgs.trim() : null,
       agentSessionId,
@@ -295,27 +282,23 @@ export function killAllLiveSessions(db: Database.Database): void {
 // rewrite layout trees to point at the resumed sessions.
 export function resumeSessionsOnBoot(db: Database.Database): Map<number, number | null> {
   const staleRows = db
-    .prepare(
-      `SELECT ts.*, aa.resume_flag AS adapter_resume_flag
-       FROM terminal_sessions ts
-       LEFT JOIN agent_adapters aa ON aa.id = ts.agent_adapter_id
-       WHERE ts.status = 'active'`,
-    )
-    .all() as (TerminalSessionRow & { adapter_resume_flag: string | null })[];
+    .prepare("SELECT * FROM terminal_sessions WHERE status = 'active'")
+    .all() as TerminalSessionRow[];
 
   const idMap = new Map<number, number | null>();
   const now = new Date().toISOString();
 
   for (const row of staleRows) {
     let resumedId: number | null = null;
-    if (row.agent_adapter_id && row.adapter_resume_flag && row.agent_session_id) {
+    const adapter = row.agent_adapter_name ? findAgentConfig(row.agent_adapter_name) : undefined;
+    if (adapter?.resumeFlag && row.agent_session_id) {
       try {
         const resumed = spawnSession(
           db,
           row.campaign_id,
           row.cwd,
           row.label ?? undefined,
-          row.agent_adapter_id,
+          row.agent_adapter_name ?? undefined,
           Boolean(row.yolo),
           row.extra_args ?? undefined,
           row.agent_session_id,

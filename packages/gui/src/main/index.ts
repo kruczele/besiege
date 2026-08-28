@@ -3,12 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   acknowledgeNotification,
-  createAgentAdapter,
   createCampaign,
   createConfigRule,
   createLayout,
   createTerminal,
-  deleteAgentAdapter,
   deleteCampaign,
   deleteConfigRule,
   deleteLayout,
@@ -30,7 +28,6 @@ import {
   releasePrClaim,
   retireTask,
   triggerCampaignSync,
-  updateAgentAdapter,
   updateCampaign,
   updateConfigRule,
   updateLayout,
@@ -176,30 +173,17 @@ daemonHandle(
     campaignId: number,
     cwd: string | undefined,
     label: string | undefined,
-    agentAdapterId: number | undefined,
+    agentAdapterName: string | undefined,
     yolo: boolean | undefined,
     extraArgs: string | undefined,
     resumeFromTerminalId: number | undefined,
-  ) => createTerminal(campaignId, cwd, label, agentAdapterId, yolo, extraArgs, resumeFromTerminalId),
+  ) => createTerminal(campaignId, cwd, label, agentAdapterName, yolo, extraArgs, resumeFromTerminalId),
 );
 daemonHandle("terminals:kill", (id: number) => killTerminal(id));
 daemonHandle("terminals:byAgentSession", (agentSessionId: string) => getTerminalByAgentSession(agentSessionId));
 daemonHandle("terminals:delete", (id: number) => deleteTerminal(id));
 
 daemonHandle("agents:list", fetchAgentAdapters);
-daemonHandle(
-  "agents:create",
-  (
-    name: string,
-    binary: string,
-    yoloFlag: string | undefined,
-    mcpConfigFlag: string | undefined,
-    sessionIdFlag: string | undefined,
-    resumeFlag: string | undefined,
-  ) => createAgentAdapter(name, binary, yoloFlag, mcpConfigFlag, sessionIdFlag, resumeFlag),
-);
-daemonHandle("agents:update", (id: number, fields: Record<string, unknown>) => updateAgentAdapter(id, fields));
-daemonHandle("agents:delete", (id: number) => deleteAgentAdapter(id));
 
 daemonHandle("layouts:list", (campaignId: number) => fetchLayouts(campaignId));
 daemonHandle("layouts:create", (campaignId: number, name: string, tree: PaneNode) =>

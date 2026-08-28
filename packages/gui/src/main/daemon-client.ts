@@ -204,7 +204,7 @@ export const createTerminal = (
   campaignId: number,
   cwd?: string,
   label?: string,
-  agentAdapterId?: number,
+  agentAdapterName?: string,
   yolo?: boolean,
   extraArgs?: string,
   resumeFromTerminalId?: number,
@@ -212,7 +212,7 @@ export const createTerminal = (
   callDaemon<TerminalSession>("POST", `/campaigns/${campaignId}/terminals`, {
     cwd,
     label,
-    agentAdapterId,
+    agentAdapterName,
     yolo,
     extraArgs,
     resumeFromTerminalId,
@@ -224,28 +224,8 @@ export const killTerminal = (id: number) =>
   callDaemon<{ ok: boolean }>("POST", `/terminals/${id}/kill`);
 export const deleteTerminal = (id: number) => callDaemon<void>("DELETE", `/terminals/${id}`);
 
-// Agent adapters
+// Agent adapters — a hand-edited YAML config now, read-only from the GUI.
 export const fetchAgentAdapters = () => callDaemon<AgentAdapter[]>("GET", "/agents");
-export const createAgentAdapter = (
-  name: string,
-  binary: string,
-  yoloFlag?: string,
-  mcpConfigFlag?: string,
-  sessionIdFlag?: string,
-  resumeFlag?: string,
-) => callDaemon<AgentAdapter>("POST", "/agents", { name, binary, yoloFlag, mcpConfigFlag, sessionIdFlag, resumeFlag });
-export const updateAgentAdapter = (
-  id: number,
-  fields: Partial<{
-    name: string;
-    binary: string;
-    yoloFlag: string;
-    mcpConfigFlag: string;
-    sessionIdFlag: string;
-    resumeFlag: string;
-  }>,
-) => callDaemon<AgentAdapter>("PATCH", `/agents/${id}`, fields);
-export const deleteAgentAdapter = (id: number) => callDaemon<void>("DELETE", `/agents/${id}`);
 
 // Terminal layouts ("tabs": a saved split-pane grid of sessions)
 export const fetchLayouts = (campaignId: number) =>
