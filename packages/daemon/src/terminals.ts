@@ -165,7 +165,19 @@ export function spawnSession(
       ]
     : [];
 
-  const proc = pty.spawn(command, argv, { cols: 80, rows: 24, cwd, env: process.env });
+  // Lets MCP tool calls from inside this session self-identify without the
+  // agent needing to pass a campaign id on every call — mirrors the
+  // BESIEGE_* env vars `besiege dispatch` already sets (cli.ts). Reuses the
+  // adapter's own resumable conversation id when there is one, so claims
+  // and notifications made before *and* after a boot-time resume tie back
+  // to the same logical session.
+  const besiegeSessionId = agentSessionId ?? randomUUID();
+  const proc = pty.spawn(command, argv, {
+    cols: 80,
+    rows: 24,
+    cwd,
+    env: { ...process.env, BESIEGE_CAMPAIGN_ID: String(campaignId), BESIEGE_SESSION_ID: besiegeSessionId },
+  });
 
   const createdAt = new Date().toISOString();
   const info = db

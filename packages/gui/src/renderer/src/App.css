@@ -362,6 +362,33 @@ h1 {
   overflow-x: auto;
 }
 
+.tasks-panel {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #2a2e38;
+}
+
+.tasks-panel h2 {
+  font-size: 0.9rem;
+  color: #9ba1b0;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tasks-panel .campaign-picker {
+  margin-bottom: 0.75rem;
+}
+
+.tasks-panel .rule-list {
+  margin-bottom: 0.75rem;
+}
+
+.tasks-panel .rule-form {
+  max-width: 28rem;
+}
+
 .campaign-grid {
   border-collapse: collapse;
   font-size: 0.82rem;
@@ -480,7 +507,29 @@ h1 {
 .claim-card .c-agent {
   font-size: 0.72rem;
   color: #6b7280;
+}
+
+.c-agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   margin-top: 0.2rem;
+}
+
+.c-agent-row button {
+  background: #2a2e38;
+  border: none;
+  border-radius: 4px;
+  color: #e7e8ed;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.c-agent-row button:hover {
+  background: #3a3f50;
 }
 
 .empty-hint {
@@ -565,7 +614,14 @@ h1 {
   opacity: 1;
 }
 
+.layout-tab button svg {
+  display: block;
+}
+
 .layout-tab-new {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
   background: none;
   border: 1px dashed #3a3f50;
   border-radius: 999px;
@@ -717,13 +773,14 @@ h1 {
 }
 
 .terminal-grid-pane-actions button {
+  display: flex;
+  align-items: center;
   background: none;
   border: none;
   color: inherit;
   opacity: 0.6;
   cursor: pointer;
   padding: 0 0.2rem;
-  font-size: 0.85rem;
 }
 
 .terminal-grid-pane-actions button:hover {

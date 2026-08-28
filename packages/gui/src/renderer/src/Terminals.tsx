@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
 import type { AgentAdapter, Campaign, PaneNode, TerminalLayout, TerminalSession } from "../../shared/types.js";
 import { closePane, emptyTree, leavesInOrder, setPaneSession, setRatio, splitPane } from "./pane-tree.js";
 
@@ -198,13 +199,13 @@ function PaneView({
             </span>
             <div className="terminal-grid-pane-actions">
               <button title="Split right" onClick={() => onSplit(node.id, "row")}>
-                ⬒
+                <PanelRightOpen size={13} />
               </button>
               <button title="Split down" onClick={() => onSplit(node.id, "col")}>
-                ⬓
+                <PanelBottomOpen size={13} />
               </button>
               <button title="Close pane" onClick={() => onClosePane(node.id, session.id)}>
-                ×
+                <X size={13} />
               </button>
             </div>
           </div>
@@ -515,12 +516,12 @@ export function TerminalsMain({ campaignId }: { campaignId: number | null }) {
               </span>
             )}
             <button title="Close tab" onClick={() => handleDeleteLayout(l.id)}>
-              ×
+              <X size={12} />
             </button>
           </div>
         ))}
         <button className="layout-tab-new" title="New tab (split it with Ctrl+Shift+→/↓)" onClick={handleNewTab}>
-          + tab
+          <Plus size={13} /> tab
         </button>
       </div>
 

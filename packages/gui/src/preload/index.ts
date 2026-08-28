@@ -10,6 +10,7 @@ import type {
   Notification,
   PaneNode,
   PrGridRow,
+  TaskDefinition,
   TerminalLayout,
   TerminalSession,
 } from "../shared/types.js";
@@ -53,6 +54,21 @@ const api = {
     fields: Partial<{ name: string; description: string | null; default_dir: string | null }>,
   ): Promise<DaemonResult<Campaign>> => ipcRenderer.invoke("campaigns:update", id, fields),
   deleteCampaign: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("campaigns:delete", id),
+
+  listTasks: (campaignId: number, stepId: number): Promise<DaemonResult<TaskDefinition[]>> =>
+    ipcRenderer.invoke("tasks:list", campaignId, stepId),
+  createTask: (
+    campaignId: number,
+    stepId: number,
+    name: string,
+    context: string,
+    since: string,
+  ): Promise<DaemonResult<TaskDefinition>> =>
+    ipcRenderer.invoke("tasks:create", campaignId, stepId, name, context, since),
+  retireTask: (campaignId: number, stepId: number, taskId: number): Promise<DaemonResult<TaskDefinition>> =>
+    ipcRenderer.invoke("tasks:retire", campaignId, stepId, taskId),
+
+  releaseClaim: (prId: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("claims:release", prId),
 
   listTerminals: (campaignId: number): Promise<DaemonResult<TerminalSession[]>> =>
     ipcRenderer.invoke("terminals:list", campaignId),

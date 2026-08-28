@@ -19,11 +19,15 @@ import {
   fetchCampaigns,
   fetchConfigRules,
   fetchDaemonHealth,
+  createTask,
   fetchLayouts,
   fetchNotifications,
   fetchSteps,
+  fetchTasks,
   killTerminal,
   listTerminals,
+  releasePrClaim,
+  retireTask,
   triggerCampaignSync,
   updateAgentAdapter,
   updateCampaign,
@@ -151,6 +155,18 @@ daemonHandle("campaigns:create", (name: string, description: string | undefined,
 );
 daemonHandle("campaigns:update", (id: number, fields: Record<string, unknown>) => updateCampaign(id, fields));
 daemonHandle("campaigns:delete", (id: number) => deleteCampaign(id));
+
+daemonHandle("tasks:list", (campaignId: number, stepId: number) => fetchTasks(campaignId, stepId));
+daemonHandle(
+  "tasks:create",
+  (campaignId: number, stepId: number, name: string, context: string, since: string) =>
+    createTask(campaignId, stepId, name, context, since),
+);
+daemonHandle("tasks:retire", (campaignId: number, stepId: number, taskId: number) =>
+  retireTask(campaignId, stepId, taskId),
+);
+
+daemonHandle("claims:release", (prId: number) => releasePrClaim(prId));
 
 daemonHandle("terminals:list", (campaignId: number) => listTerminals(campaignId));
 daemonHandle(
