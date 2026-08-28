@@ -69,11 +69,24 @@ async function resolveStepId(campaign: string, step: string): Promise<number> {
   return match.id;
 }
 
-async function resolvePrId(campaign: string, repo: string, step: string): Promise<number> {
+async function resolvePrId(
+  campaign: string,
+  repo: string,
+  step: string,
+  githubPrNumber?: number,
+  githubNodeId?: string,
+): Promise<number> {
   const [repoId, stepId] = await Promise.all([resolveRepoId(campaign, repo), resolveStepId(campaign, step)]);
   // Upsert — idempotent per the UNIQUE(step_id, repo_id) constraint, same as
-  // `besiege dispatch` (cli.ts).
-  const pr = await postJson<Pr>("/prs", { step_id: stepId, repo_id: repoId });
+  // `besiege dispatch` (cli.ts). github_pr_number/github_node_id are
+  // COALESCEd server-side, so omitting them here never clobbers a value
+  // register_pr already set.
+  const pr = await postJson<Pr>("/prs", {
+    step_id: stepId,
+    repo_id: repoId,
+    github_pr_number: githubPrNumber,
+    github_node_id: githubNodeId,
+  });
   return pr.id;
 }
 
@@ -190,6 +203,36 @@ const TOOLS = [
     },
   },
   {
+    name: "register_pr",
+    description:
+      "Record GitHub PR numbers (and optionally node ids) for one or many (repo, step) pairs once they've " +
+      "actually been opened, e.g. right after a batch of `gh pr create` runs across a campaign's repos. Takes " +
+      "a list so one call covers however many PRs you have, instead of one call per PR. This is what lets the " +
+      "campaign board show real PR state (CI, review, lifecycle) instead of 'not started' — without it, the " +
+      "daemon has no way to know a PR exists.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        entries: {
+          type: "array",
+          description: "One entry per PR to register",
+          items: {
+            type: "object",
+            properties: {
+              repo: { type: "string", description: 'GitHub full name, e.g. "org/repo"' },
+              step: { type: "string", description: "Step name within the campaign" },
+              githubPrNumber: { type: "number", description: "The PR number from GitHub, e.g. 42" },
+              githubNodeId: { type: "string", description: "Optional GitHub GraphQL node id, if you have it" },
+            },
+            required: ["repo", "step", "githubPrNumber"],
+          },
+        },
+        campaign: CAMPAIGN_PROPERTY,
+      },
+      required: ["entries"],
+    },
+  },
+  {
     name: "create_task",
     description:
       "Register a new task definition for a step — instructions that should be applied to every PR in " +
@@ -285,6 +328,31 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         await deleteJson(`/prs/${prId}/claim`);
         claimedPrIds.delete(prId);
         return { content: [{ type: "text", text: `Released claim on PR ${prId} (${repo}, step ${step}).` }] };
+      }
+
+      case "register_pr": {
+        const campaign = resolveCampaign(a);
+        const entries = (args as { entries?: unknown[] } | undefined)?.entries;
+        if (!Array.isArray(entries) || entries.length === 0) {
+          throw new Error("entries (a non-empty array) is required");
+        }
+        const outcomes = await Promise.allSettled(
+          entries.map(async (raw) => {
+            const entry = raw as { repo?: string; step?: string; githubPrNumber?: number; githubNodeId?: string };
+            if (!entry.repo || !entry.step || !entry.githubPrNumber) {
+              throw new Error(`invalid entry: ${JSON.stringify(raw)}`);
+            }
+            const prId = await resolvePrId(campaign, entry.repo, entry.step, entry.githubPrNumber, entry.githubNodeId);
+            return `${entry.repo} (${entry.step}) -> PR #${entry.githubPrNumber}, pr id ${prId}`;
+          }),
+        );
+        const lines = outcomes.map((o, i) =>
+          o.status === "fulfilled"
+            ? `ok: ${o.value}`
+            : `failed (entry ${i}): ${o.reason instanceof Error ? o.reason.message : String(o.reason)}`,
+        );
+        const allFailed = outcomes.length > 0 && outcomes.every((o) => o.status === "rejected");
+        return { content: [{ type: "text", text: lines.join("\n") }], isError: allFailed };
       }
 
       case "create_task": {

@@ -207,6 +207,7 @@ export const createTerminal = (
   agentAdapterId?: number,
   yolo?: boolean,
   extraArgs?: string,
+  resumeFromTerminalId?: number,
 ) =>
   callDaemon<TerminalSession>("POST", `/campaigns/${campaignId}/terminals`, {
     cwd,
@@ -214,8 +215,11 @@ export const createTerminal = (
     agentAdapterId,
     yolo,
     extraArgs,
+    resumeFromTerminalId,
   });
 export const getTerminal = (id: number) => callDaemon<TerminalSession>("GET", `/terminals/${id}`);
+export const getTerminalByAgentSession = (agentSessionId: string) =>
+  callDaemon<TerminalSession>("GET", `/terminal-sessions/by-agent-session/${encodeURIComponent(agentSessionId)}`);
 export const killTerminal = (id: number) =>
   callDaemon<{ ok: boolean }>("POST", `/terminals/${id}/kill`);
 export const deleteTerminal = (id: number) => callDaemon<void>("DELETE", `/terminals/${id}`);

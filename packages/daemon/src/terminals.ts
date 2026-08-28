@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripInheritedAgentEnv } from "./env.js";
 import { stateDir } from "./paths.js";
 
 // Ring buffer cap: last ~200KB of output per session. A chatty long-lived
@@ -176,7 +177,11 @@ export function spawnSession(
     cols: 80,
     rows: 24,
     cwd,
-    env: { ...process.env, BESIEGE_CAMPAIGN_ID: String(campaignId), BESIEGE_SESSION_ID: besiegeSessionId },
+    env: {
+      ...stripInheritedAgentEnv(process.env),
+      BESIEGE_CAMPAIGN_ID: String(campaignId),
+      BESIEGE_SESSION_ID: besiegeSessionId,
+    },
   });
 
   const createdAt = new Date().toISOString();

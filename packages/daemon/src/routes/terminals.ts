@@ -40,9 +40,30 @@ const toSession = (r: TerminalSessionWithAgentRow) => ({
   agentName: r.agent_name,
   yolo: Boolean(r.yolo),
   extraArgs: r.extra_args,
+  agentSessionId: r.agent_session_id,
 });
 
 export function registerTerminalRoutes(app: FastifyInstance, db: Database.Database) {
+  // Global (not campaign-scoped) lookup — a notification only carries the
+  // BESIEGE_SESSION_ID string of whoever raised it, not a campaign id, and
+  // that id is the agent's own conversation id (agent_session_id) for any
+  // adapter with resume support (Claude today). Used by the Inbox/Live
+  // panels to resolve "which session/campaign is this about" so they can
+  // show something more useful than a raw id and offer a jump-to-it button.
+  app.get<{ Params: { agentSessionId: string } }>(
+    "/terminal-sessions/by-agent-session/:agentSessionId",
+    async (req, reply) => {
+      const row = db
+        .prepare(`${SELECT_SESSION} WHERE ts.agent_session_id = ? ORDER BY ts.id DESC LIMIT 1`)
+        .get(req.params.agentSessionId) as TerminalSessionWithAgentRow | undefined;
+      if (!row) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return toSession(row);
+    },
+  );
+
   app.get<{ Params: { campaignId: string } }>(
     "/campaigns/:campaignId/terminals",
     async (req, reply) => {
@@ -60,7 +81,19 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
 
   app.post<{
     Params: { campaignId: string };
-    Body: { cwd?: string; label?: string; agentAdapterId?: number; yolo?: boolean; extraArgs?: string };
+    Body: {
+      cwd?: string;
+      label?: string;
+      agentAdapterId?: number;
+      yolo?: boolean;
+      extraArgs?: string;
+      // Manual counterpart to the boot-time auto-resume (terminals.ts
+      // resumeSessionsOnBoot): relaunches the same agent conversation from
+      // an exited session's own agent_session_id, e.g. a "Resume" button
+      // on a pane whose agent process ended. Every other field on the body
+      // is ignored in favor of what's recorded on that prior session.
+      resumeFromTerminalId?: number;
+    };
   }>("/campaigns/:campaignId/terminals", async (req, reply) => {
     const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(req.params.campaignId) as
       | CampaignRow
@@ -68,6 +101,42 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
     if (!campaign) {
       reply.code(404);
       return { error: "campaign not found" };
+    }
+
+    if (req.body?.resumeFromTerminalId !== undefined) {
+      const prior = db
+        .prepare("SELECT * FROM terminal_sessions WHERE id = ? AND campaign_id = ?")
+        .get(req.body.resumeFromTerminalId, req.params.campaignId) as TerminalSessionRow | undefined;
+      if (!prior) {
+        reply.code(404);
+        return { error: "session to resume from not found" };
+      }
+      if (!prior.agent_adapter_id || !prior.agent_session_id) {
+        reply.code(400);
+        return { error: "session has no resumable agent conversation" };
+      }
+      const adapter = db
+        .prepare("SELECT resume_flag FROM agent_adapters WHERE id = ?")
+        .get(prior.agent_adapter_id) as { resume_flag: string | null } | undefined;
+      if (!adapter?.resume_flag) {
+        reply.code(400);
+        return { error: "adapter does not support resume" };
+      }
+      const resumed = spawnSession(
+        db,
+        Number(req.params.campaignId),
+        prior.cwd,
+        prior.label ?? undefined,
+        prior.agent_adapter_id,
+        Boolean(prior.yolo),
+        prior.extra_args ?? undefined,
+        prior.agent_session_id,
+      );
+      const withAgent = db
+        .prepare(`${SELECT_SESSION} WHERE ts.id = ?`)
+        .get(resumed.id) as TerminalSessionWithAgentRow;
+      reply.code(201);
+      return toSession(withAgent);
     }
 
     const cwd = req.body?.cwd?.trim() || campaign.default_dir;
