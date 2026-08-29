@@ -29,14 +29,14 @@ On top of that: running many concurrent Claude Code sessions in terminals means 
          no file writes)                     interval-based)
 ```
 
-The daemon is the single source of truth. The GUI and TUI are thin clients over its Unix socket API — no orchestration logic lives in either front-end.
+The daemon is the single source of truth. The GUI, its web UI, and the TUI are all thin clients over its Unix socket API — no orchestration logic lives in any front-end.
 
 ## Packages
 
 | Package | Description |
 |---|---|
 | [`packages/daemon`](packages/daemon) | HTTP API over a Unix socket, SQLite state, Claude Code hooks, GitHub sync |
-| `packages/gui` | Electron app for Ubuntu — campaign grid, inbox, config UI |
+| `packages/gui` | Electron app for Ubuntu — campaign grid, inbox, config UI. Also ships a browser-based alternative (`src/web`) that reuses the same UI over HTTP/WebSocket instead of Electron IPC. |
 
 ## Getting started
 
@@ -45,6 +45,28 @@ pnpm install
 pnpm dev:daemon   # daemon with hot reload
 pnpm dev:gui      # Electron app
 ```
+
+### Web UI (alternative to the Electron app)
+
+Same UI, reachable from an ordinary browser instead of the Electron window.
+
+```bash
+pnpm web
+```
+
+One-shot convenience command: starts a daemon if none is already running (leaves an already-running one alone — restarting it would kill any live agent terminal sessions it's tracking), builds the web UI, serves it on `http://127.0.0.1:4571`, and opens it in your browser. Ctrl+C stops the web server only.
+
+If you need the daemon restarted on latest source (e.g. after a daemon-side change, or if it wasn't running via `tsx watch`), use `pnpm daemon:reload` — this **does** end any live agent terminal sessions the daemon was tracking.
+
+For active development on the web UI itself (rebuild on save), run in three terminals instead:
+
+```bash
+pnpm dev:daemon      # daemon with hot reload
+pnpm dev:webclient   # builds the browser bundle, rebuilds on change
+pnpm dev:webserver   # serves it + proxies to the daemon, on http://127.0.0.1:4571
+```
+
+The web server binds to `127.0.0.1` only and has **no authentication** — it grants shell/agent command execution to whoever can reach it, so it must never be exposed beyond localhost (e.g. don't port-forward it, don't bind it to `0.0.0.0`).
 
 Wire Claude Code hooks from [`packages/daemon/README.md`](packages/daemon/README.md) to enable config injection and the notification inbox.
 

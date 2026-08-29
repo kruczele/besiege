@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "start": "electron-vite preview"
+    "start": "electron-vite preview",
+    "dev:webclient": "vite build --config vite.web.config.ts --watch",
+    "dev:webserver": "tsx watch src/web/server/index.ts",
+    "build:webclient": "vite build --config vite.web.config.ts",
+    "build:webserver": "tsc -p tsconfig.webserver.json",
+    "start:web": "node out/web-server/index.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -23,6 +28,7 @@
     "@vitejs/plugin-react": "^6.1.0",
     "electron": "^44.0.0",
     "electron-vite": "^5.0.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vite": "^8.2.2"
   }
