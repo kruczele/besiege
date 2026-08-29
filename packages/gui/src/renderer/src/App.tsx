@@ -28,7 +28,7 @@ const TAB_HELPTEXT: Record<Tab, string> = {
   rules: "Define standing rules and context that guide your agents.",
 };
 
-export function App() {
+export function App({ chrome = true }: { chrome?: boolean } = {}) {
   const [tab, setTab] = useState<Tab>("campaigns");
   // The campaign currently in focus — set by CampaignsPanel's selector, read
   // by the main terminal area so "new terminal" knows which campaign it
@@ -49,8 +49,11 @@ export function App() {
   const onTitleChange = (id: number, title: string) => setTitles((prev) => ({ ...prev, [id]: title }));
 
   // No application menu (frame: false, no visible menu bar) supplies the
-  // conventional Ctrl/Cmd +/- zoom accelerators, so handle them here.
+  // conventional Ctrl/Cmd +/- zoom accelerators, so handle them here. Not
+  // needed outside Electron's frameless window — a browser tab has its own
+  // native zoom, which this would otherwise fight (preventDefault blocks it).
   useEffect(() => {
+    if (!chrome) return;
     const handler = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.key === "+" || e.key === "=") {
@@ -66,11 +69,11 @@ export function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [chrome]);
 
   return (
     <div className="app-frame">
-      <TitleBar />
+      {chrome && <TitleBar />}
       <div className="shell">
         <aside className="sidebar">
           <h1>Besiege</h1>

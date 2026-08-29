@@ -6,6 +6,10 @@
     "dev": "pnpm --parallel --filter daemon --filter gui dev",
     "dev:daemon": "pnpm --filter daemon dev",
     "dev:gui": "pnpm --filter gui dev",
+    "dev:webclient": "pnpm --filter gui dev:webclient",
+    "dev:webserver": "pnpm --filter gui dev:webserver",
+    "web": "node scripts/web.mjs",
+    "daemon:reload": "node scripts/reload-daemon.mjs",
     "build": "pnpm -r build"
   },
   "devDependencies": {
