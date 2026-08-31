@@ -463,27 +463,39 @@ h1 {
   color: var(--text);
 }
 
-/* `>` scopes this to the toolbar's own action buttons (Sync/Archive/
-   Delete/+New) — without it, this rule's higher specificity (class + tag
-   vs. .campaign-picker-btn's class alone) silently overrode the pill
-   styling on the nested campaign-switcher buttons too, making both look
-   identical. */
-.campaign-toolbar > button {
+/* Separate row for actions on the selected campaign (Sync/Archive/Delete/
+   New) — kept out of .campaign-toolbar so picking a campaign and acting on
+   one read as two distinct controls rather than one long button row. */
+.campaign-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.campaign-actions-row > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--surface-active);
   border: none;
   border-radius: 4px;
   color: var(--text);
-  padding: 0.35rem 0.75rem;
-  font-size: 0.82rem;
+  padding: 0.4rem;
   cursor: pointer;
 }
 
-.campaign-toolbar > button:hover {
+.campaign-actions-row > button:hover {
   background: var(--surface-active-hover);
 }
 
-.campaign-toolbar > button.danger-btn {
+.campaign-actions-row > button.danger-btn {
   color: #e5645a;
+}
+
+.campaign-actions-row > button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .show-archived-toggle {

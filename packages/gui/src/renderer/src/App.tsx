@@ -1,5 +1,18 @@
 import { useEffect, useState } from "react";
-import { Copy, ExternalLink, Minus, Pin, PinOff, Square, X } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Copy,
+  ExternalLink,
+  Minus,
+  Pin,
+  PinOff,
+  Plus,
+  RefreshCw,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
 import type {
   ActiveClaim,
   Campaign,
@@ -572,26 +585,37 @@ function CampaignsPanel({
     <div className="panel">
       <div className="campaign-toolbar">
         <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={onSelectCampaign} />
-        <button onClick={handleSync} disabled={syncing}>
-          {syncing ? "Syncing…" : "Sync GitHub"}
-        </button>
-        {selectedCampaign && (
-          <button onClick={handleArchiveToggle} disabled={archiving}>
-            {selectedCampaign.archivedAt ? "Unarchive" : "Archive"}
-          </button>
-        )}
-        {selectedCampaign && (
-          <button className="danger-btn" onClick={handleDelete} disabled={deleting}>
-            {deleting ? "Deleting…" : "Delete…"}
-          </button>
-        )}
-        <button onClick={() => setShowNewForm((v) => !v)}>
-          {showNewForm ? "Cancel" : "+ New Campaign"}
-        </button>
         <label className="show-archived-toggle">
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
+      </div>
+      <div className="campaign-actions-row">
+        <button title={syncing ? "Syncing…" : "Sync GitHub"} onClick={handleSync} disabled={syncing}>
+          <RefreshCw size={15} />
+        </button>
+        {selectedCampaign && (
+          <button
+            title={selectedCampaign.archivedAt ? "Unarchive" : "Archive"}
+            onClick={handleArchiveToggle}
+            disabled={archiving}
+          >
+            {selectedCampaign.archivedAt ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+          </button>
+        )}
+        {selectedCampaign && (
+          <button
+            className="danger-btn"
+            title={deleting ? "Deleting…" : "Delete campaign"}
+            onClick={handleDelete}
+            disabled={deleting}
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+        <button title={showNewForm ? "Cancel" : "New campaign"} onClick={() => setShowNewForm((v) => !v)}>
+          {showNewForm ? <X size={15} /> : <Plus size={15} />}
+        </button>
       </div>
       {selectedCampaign?.archivedAt && (
         <p className="status status-pending">This campaign is archived (read-only from the switcher elsewhere).</p>
