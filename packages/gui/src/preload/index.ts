@@ -35,7 +35,8 @@ const api = {
   acknowledgeNotification: (id: number): Promise<DaemonResult<Notification>> =>
     ipcRenderer.invoke("notifications:ack", id),
 
-  listCampaigns: (): Promise<DaemonResult<Campaign[]>> => ipcRenderer.invoke("campaigns:list"),
+  listCampaigns: (includeArchived?: boolean): Promise<DaemonResult<Campaign[]>> =>
+    ipcRenderer.invoke("campaigns:list", includeArchived),
   listSteps: (campaignId: number): Promise<DaemonResult<CampaignStep[]>> =>
     ipcRenderer.invoke("campaigns:steps", campaignId),
   listCampaignPrs: (campaignId: number, needsMe: boolean): Promise<DaemonResult<PrGridRow[]>> =>
@@ -53,6 +54,8 @@ const api = {
     id: number,
     fields: Partial<{ name: string; description: string | null; default_dir: string | null }>,
   ): Promise<DaemonResult<Campaign>> => ipcRenderer.invoke("campaigns:update", id, fields),
+  archiveCampaign: (id: number): Promise<DaemonResult<Campaign>> => ipcRenderer.invoke("campaigns:archive", id),
+  unarchiveCampaign: (id: number): Promise<DaemonResult<Campaign>> => ipcRenderer.invoke("campaigns:unarchive", id),
   deleteCampaign: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("campaigns:delete", id),
 
   listTasks: (campaignId: number, stepId: number): Promise<DaemonResult<TaskDefinition[]>> =>

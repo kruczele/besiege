@@ -347,7 +347,7 @@ export const migrations: Migration[] = [
     sql: "-- seed-only migration, see BESIEGE_ORIENTATION_RULE below (inserted via `after`)",
     after: (db) => {
       db.prepare("INSERT INTO config_rules (pattern, context, created_at) VALUES ('*', ?, ?)").run(
-        BESIEGE_ORIENTATION_RULE,
+        BESIEGE_ORIENTATION_RULE_0022,
         new Date().toISOString(),
       );
     },
@@ -397,19 +397,59 @@ export const migrations: Migration[] = [
       ALTER TABLE prs ADD COLUMN branch_name TEXT;
     `,
   },
+  {
+    // Another seed-only update, not a schema change (see 0022). Only touches
+    // the row if its content still matches the original 0022 text verbatim —
+    // the rule is deliberately freely editable/deletable from the Edicts
+    // tab, so a user edit or delete must be left alone rather than clobbered.
+    name: "0026_besiege_orientation_rule_notify_on_done",
+    sql: "-- seed-update-only migration, see BESIEGE_ORIENTATION_RULE_0022 below (updated via `after`)",
+    after: (db) => {
+      db.prepare("UPDATE config_rules SET context = ? WHERE pattern = '*' AND context = ?").run(
+        BESIEGE_ORIENTATION_RULE,
+        BESIEGE_ORIENTATION_RULE_0022,
+      );
+    },
+  },
+  {
+    name: "0027_campaign_archived_at",
+    sql: `
+      -- A campaign a user is done actively driving but doesn't want to lose
+      -- the history of (PRs, tasks, claims). NULL = active/default-listed;
+      -- set = hidden from the default campaign list/switcher but still
+      -- readable and reversible, unlike DELETE /campaigns/:id which is a
+      -- real cascading delete of everything underneath it.
+      ALTER TABLE campaigns ADD COLUMN archived_at TEXT;
+    `,
+  },
 ];
 
 // Seeded once as a `config_rules` row (pattern '*', so it's injected into
 // every session's SessionStart additionalContext regardless of cwd) —
 // deliberately just data, not special-cased code, so it shows up in the
 // Edicts tab like any other rule and the user can edit or delete it freely.
-const BESIEGE_ORIENTATION_RULE = `You're running inside Besiege, a daemon-backed console for coding-agent work across multiple repos in a campaign. A few things worth knowing:
+// Frozen exactly as migration 0022 inserted it — needed verbatim so 0026 can
+// tell whether a row still holds the original seed (and is therefore safe to
+// update) or has since been user-edited/deleted (and must be left alone).
+const BESIEGE_ORIENTATION_RULE_0022 = `You're running inside Besiege, a daemon-backed console for coding-agent work across multiple repos in a campaign. A few things worth knowing:
 
 - Environment: BESIEGE_CAMPAIGN_ID and BESIEGE_SESSION_ID identify this session; BESIEGE_STEP_ID/BESIEGE_PR_ID/BESIEGE_REPO are also set if you were dispatched against a specific PR.
 - The besiege MCP server, if wired into this session, exposes pr_state / pending_tasks / failure_pattern for reading campaign state, and claim_pr / release_pr / create_task / notify / register_pr for acting on it.
 - Once you've actually opened a PR (e.g. after \`gh pr create\`), call register_pr — that's the only way the daemon learns it exists at all. It takes a list, so if you're working across many repos, register them all in one call instead of one call each. A repo doesn't need to be registered in the campaign beforehand — register_pr (and claim_pr) add it automatically the first time you mention it.
 - Once you know which (repo, step) you're actually working on, call claim_pr — that's what makes you show up with real PR context on the campaign's Army tab. It's cheap and advisory, so call it as soon as you know, not only once you're sure.
 - If you get blocked or have a question that needs a human, call notify instead of just stopping silently — it goes straight into the operator's attention inbox.
+- If you find work that should apply to every PR in a step, not just the one you're on, register it with create_task instead of only fixing it locally.
+
+This rule was seeded by Besiege and applies everywhere (pattern '*'). Edit or delete it from the Edicts tab if it stops being accurate.`;
+
+// Current version — what 0026 updates a still-unedited row to.
+const BESIEGE_ORIENTATION_RULE = `You're running inside Besiege, a daemon-backed console for coding-agent work across multiple repos in a campaign. A few things worth knowing:
+
+- Environment: BESIEGE_CAMPAIGN_ID and BESIEGE_SESSION_ID identify this session; BESIEGE_STEP_ID/BESIEGE_PR_ID/BESIEGE_REPO are also set if you were dispatched against a specific PR.
+- The besiege MCP server, if wired into this session, exposes pr_state / pending_tasks / failure_pattern for reading campaign state, and claim_pr / release_pr / create_task / notify / register_pr for acting on it.
+- Once you've actually opened a PR (e.g. after \`gh pr create\`), call register_pr — that's the only way the daemon learns it exists at all. It takes a list, so if you're working across many repos, register them all in one call instead of one call each. A repo doesn't need to be registered in the campaign beforehand — register_pr (and claim_pr) add it automatically the first time you mention it.
+- Once you know which (repo, step) you're actually working on, call claim_pr — that's what makes you show up with real PR context on the campaign's Army tab. It's cheap and advisory, so call it as soon as you know, not only once you're sure.
+- Call notify any time a human needs to look: you're blocked or have a question, or you've finished the task you were given and it's ready for review — either way, notify goes straight into the operator's attention inbox instead of you just stopping silently.
 - If you find work that should apply to every PR in a step, not just the one you're on, register it with create_task instead of only fixing it locally.
 
 This rule was seeded by Besiege and applies everywhere (pattern '*'). Edit or delete it from the Edicts tab if it stops being accurate.`;

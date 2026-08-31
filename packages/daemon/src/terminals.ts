@@ -160,6 +160,11 @@ export function spawnSession(
   // and notifications made before *and* after a boot-time resume tie back
   // to the same logical session.
   const besiegeSessionId = agentSessionId ?? randomUUID();
+  // Always persisted below (even for adapters without resume support, and
+  // plain shells) so GET /terminal-sessions/by-agent-session/:id can resolve
+  // ANY session's notifications/claims back to it — resumability itself is
+  // still gated separately on adapter.resumeFlag (see resumeSessionsOnBoot
+  // and the resume route), never on this column's mere presence.
   const proc = pty.spawn(command, argv, {
     cols: 80,
     rows: 24,
@@ -185,7 +190,7 @@ export function spawnSession(
       adapter?.name ?? null,
       yolo && adapter ? 1 : 0,
       adapter && extraArgs?.trim() ? extraArgs.trim() : null,
-      agentSessionId,
+      besiegeSessionId,
     );
   const id = Number(info.lastInsertRowid);
 

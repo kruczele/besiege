@@ -321,9 +321,19 @@ function PrBoard({ prs }: { prs: PrGridRow[] }) {
                                 <ul className="pr-board-repo-list">
                                   {g.prs.map((p) => (
                                     <li key={p.id}>
-                                      {p.repoName}
-                                      {p.githubPrNumber != null && (
-                                        <span className="pr-board-pr-number"> #{p.githubPrNumber}</span>
+                                      {p.githubPrNumber != null ? (
+                                        <a
+                                          className="pr-board-pr-link"
+                                          href={`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          {p.repoName}
+                                          <span className="pr-board-pr-number"> #{p.githubPrNumber}</span>
+                                        </a>
+                                      ) : (
+                                        p.repoName
                                       )}
                                       {p.pendingTasksCount > 0 && (
                                         <span className="pending-badge"> +{p.pendingTasksCount} pending</span>
@@ -432,9 +442,12 @@ function CampaignsPanel({
   const [prs, setPrs] = useState<PrGridRow[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const reloadCampaigns = (selectId?: number) => {
-    window.api.listCampaigns().then((res) => {
+    window.api.listCampaigns(showArchived).then((res) => {
       if (res.ok) {
         setCampaigns(res.result);
         if (selectId !== undefined) onSelectCampaign(selectId);
@@ -445,7 +458,8 @@ function CampaignsPanel({
 
   useEffect(() => {
     reloadCampaigns();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArchived]);
 
   const handleCreated = (c: Campaign) => {
     setShowNewForm(false);
@@ -481,6 +495,52 @@ function CampaignsPanel({
     setTimeout(() => setSyncing(false), 1500);
   };
 
+  const selectedCampaign = campaigns.find((c) => c.id === selectedId) ?? null;
+
+  const handleArchiveToggle = async () => {
+    if (!selectedCampaign) return;
+    const wasArchiving = !selectedCampaign.archivedAt;
+    setArchiving(true);
+    await (selectedCampaign.archivedAt
+      ? window.api.unarchiveCampaign(selectedCampaign.id)
+      : window.api.archiveCampaign(selectedCampaign.id));
+    setArchiving(false);
+    // Archiving the selected campaign (with the archived list hidden) drops
+    // it out of the switcher entirely — move selection to whatever's left
+    // rather than leaving the board pointed at a campaign no longer listed.
+    if (wasArchiving && !showArchived) {
+      const res = await window.api.listCampaigns(false);
+      if (res.ok) {
+        setCampaigns(res.result);
+        if (res.result[0]) onSelectCampaign(res.result[0].id);
+        return;
+      }
+    }
+    reloadCampaigns();
+  };
+
+  const handleDelete = async () => {
+    if (!selectedCampaign) return;
+    // Cascading and permanent (unlike archive) — everything under the
+    // campaign (PRs, tasks, claims, terminal sessions) goes with it.
+    if (
+      !window.confirm(
+        `Permanently delete "${selectedCampaign.name}" and everything under it (PRs, tasks, claims, terminal sessions)? This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    const res = await window.api.deleteCampaign(selectedCampaign.id);
+    setDeleting(false);
+    if (!res.ok) return;
+    const listRes = await window.api.listCampaigns(showArchived);
+    if (listRes.ok) {
+      setCampaigns(listRes.result);
+      if (listRes.result[0]) onSelectCampaign(listRes.result[0].id);
+    }
+  };
+
   // Build repo list + lookup: "repoName::stepId" → PrGridRow
   const repos = Array.from(new Set(prs.map((p) => p.repoName))).sort();
   const prIndex = new Map<string, PrGridRow>();
@@ -489,7 +549,11 @@ function CampaignsPanel({
   if (campaigns.length === 0) {
     return (
       <div className="panel">
-        <p className="status status-pending">No campaigns yet.</p>
+        <p className="status status-pending">{showArchived ? "No campaigns yet." : "No active campaigns."}</p>
+        <label className="show-archived-toggle">
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived
+        </label>
         <NewCampaignForm onCreated={handleCreated} />
       </div>
     );
@@ -502,10 +566,27 @@ function CampaignsPanel({
         <button onClick={handleSync} disabled={syncing}>
           {syncing ? "Syncing…" : "Sync GitHub"}
         </button>
+        {selectedCampaign && (
+          <button onClick={handleArchiveToggle} disabled={archiving}>
+            {selectedCampaign.archivedAt ? "Unarchive" : "Archive"}
+          </button>
+        )}
+        {selectedCampaign && (
+          <button className="danger-btn" onClick={handleDelete} disabled={deleting}>
+            {deleting ? "Deleting…" : "Delete…"}
+          </button>
+        )}
         <button onClick={() => setShowNewForm((v) => !v)}>
           {showNewForm ? "Cancel" : "+ New Campaign"}
         </button>
+        <label className="show-archived-toggle">
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived
+        </label>
       </div>
+      {selectedCampaign?.archivedAt && (
+        <p className="status status-pending">This campaign is archived (read-only from the switcher elsewhere).</p>
+      )}
 
       {showNewForm && <NewCampaignForm onCreated={handleCreated} />}
 

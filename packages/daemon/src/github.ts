@@ -165,6 +165,30 @@ export function getGitHubToken(): string | null {
   return null;
 }
 
+// A one-off REST lookup (not the batched GraphQL path above) for the case
+// where an agent registered a PR by number only, with no node id — there's
+// nothing to batch, and this is the only way to *get* a node id from just a
+// repo + PR number. Also grabs head.ref for free so branch_name has a value
+// immediately, without waiting on the next syncPr/syncAllActivePrs pass.
+export async function fetchPrNodeId(
+  repoFullName: string,
+  prNumber: number,
+  token: string,
+): Promise<{ nodeId: string; branchName: string | null } | null> {
+  const res = await fetch(`https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`, {
+    headers: {
+      Authorization: `bearer ${token}`,
+      "User-Agent": "besiege-daemon",
+      Accept: "application/vnd.github+json",
+    },
+  });
+  if (!res.ok) return null;
+
+  const json = (await res.json()) as { node_id?: string; head?: { ref?: string } };
+  if (!json.node_id) return null;
+  return { nodeId: json.node_id, branchName: json.head?.ref ?? null };
+}
+
 export async function syncPr(db: Database.Database, prId: number): Promise<void> {
   const token = getGitHubToken();
   if (!token) return;

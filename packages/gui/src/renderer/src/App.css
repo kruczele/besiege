@@ -460,6 +460,19 @@ h1 {
   background: var(--surface-active-hover);
 }
 
+.campaign-toolbar button.danger-btn {
+  color: #e5645a;
+}
+
+.show-archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
 .campaign-grid-wrap {
   overflow-x: auto;
 }
@@ -562,6 +575,15 @@ h1 {
 
 .pr-board-pr-number {
   color: var(--text-secondary);
+}
+
+.pr-board-pr-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.pr-board-pr-link:hover {
+  text-decoration: underline;
 }
 
 .tasks-panel {

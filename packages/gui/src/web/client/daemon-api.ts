@@ -41,13 +41,16 @@ export const fetchNotifications = (unacknowledgedOnly: boolean) =>
 export const acknowledgeNotification = (id: number) =>
   callDaemon<Notification>("POST", `/notifications/${id}/ack`);
 
-export const fetchCampaigns = () => callDaemon<Campaign[]>("GET", "/campaigns");
+export const fetchCampaigns = (includeArchived?: boolean) =>
+  callDaemon<Campaign[]>("GET", `/campaigns${includeArchived ? "?includeArchived=1" : ""}`);
 export const createCampaign = (name: string, description?: string, defaultDir?: string) =>
   callDaemon<Campaign>("POST", "/campaigns", { name, description, default_dir: defaultDir });
 export const updateCampaign = (
   id: number,
   fields: Partial<{ name: string; description: string | null; default_dir: string | null }>,
 ) => callDaemon<Campaign>("PATCH", `/campaigns/${id}`, fields);
+export const archiveCampaign = (id: number) => callDaemon<Campaign>("POST", `/campaigns/${id}/archive`);
+export const unarchiveCampaign = (id: number) => callDaemon<Campaign>("POST", `/campaigns/${id}/unarchive`);
 export const deleteCampaign = (id: number) => callDaemon<void>("DELETE", `/campaigns/${id}`);
 
 export const fetchSteps = (campaignId: number) =>
