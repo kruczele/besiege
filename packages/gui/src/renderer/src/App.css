@@ -331,6 +331,18 @@ h1 {
   opacity: 0.5;
 }
 
+.notification-card-system {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.n-message-system {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-x: auto;
+}
+
 .notification-card.clickable,
 .claim-card.clickable {
   cursor: pointer;

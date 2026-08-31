@@ -56,6 +56,27 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
     },
   );
 
+  // Hit by hooks/session-start.ts (using its own BESIEGE_SESSION_ID env var,
+  // inherited from the pty it's a child process of) the moment its hook
+  // actually runs inside a live Claude Code session — proof positive that
+  // Besiege's hooks are wired up on this machine. hook-health.ts's periodic
+  // sweep uses the absence of this to detect the opposite. Best-effort: a
+  // session already gone (e.g. exited before the hook fired) is a no-op,
+  // not an error, and the hook script ignores this route's response either way.
+  app.post<{ Params: { agentSessionId: string } }>(
+    "/terminal-sessions/by-agent-session/:agentSessionId/hook-confirm",
+    async (req, reply) => {
+      const result = db
+        .prepare("UPDATE terminal_sessions SET hook_confirmed_at = ? WHERE agent_session_id = ?")
+        .run(new Date().toISOString(), req.params.agentSessionId);
+      if (result.changes === 0) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      reply.code(204);
+    },
+  );
+
   app.get<{ Params: { campaignId: string } }>(
     "/campaigns/:campaignId/terminals",
     async (req, reply) => {

@@ -3,6 +3,7 @@ import { openDb } from "./db.js";
 import { buildServer } from "./server.js";
 import { dbPath, pidPath, socketPath, stateDir } from "./paths.js";
 import { getGitHubToken, syncAllActivePrs, syncPr, syncCampaign, expireStaleClaims } from "./github.js";
+import { checkHookHealth } from "./hook-health.js";
 import { killAllLiveSessions, resumeSessionsOnBoot } from "./terminals.js";
 import { remapSessionIds, sessionIdsInTree, type PaneNode } from "./layout-tree.js";
 
@@ -66,10 +67,14 @@ async function main() {
     setInterval(() => {
       syncAllActivePrs(db).catch(console.error);
       expireStaleClaims(db);
+      checkHookHealth(db);
     }, 60_000);
   } else {
     console.log("No GitHub token — PR sync disabled (set GITHUB_TOKEN or run gh auth login)");
-    setInterval(() => expireStaleClaims(db), 60_000);
+    setInterval(() => {
+      expireStaleClaims(db);
+      checkHookHealth(db);
+    }, 60_000);
   }
 
   const shutdown = async (signal: string) => {
