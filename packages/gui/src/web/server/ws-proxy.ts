@@ -13,8 +13,15 @@ export function proxyTerminalStream(id: number, req: IncomingMessage, socket: Du
   wss.handleUpgrade(req, socket, head, (browserWs) => {
     const daemonWs = new WebSocket(`ws+unix://${socketPath}:/terminals/${id}/stream`);
 
+    // `ws` always hands "message" listeners a Buffer, even for text frames
+    // (it never auto-decodes based on the original opcode) — sending that
+    // Buffer straight through would make `ws.send` pick a binary opcode,
+    // and the browser's own WebSocket (binaryType "blob" by default) then
+    // hands JSON.parse a Blob instead of a string, throwing silently and
+    // dropping every output frame. Stringify explicitly so it round-trips
+    // as the text frame the daemon actually sent.
     daemonWs.on("message", (data) => {
-      if (browserWs.readyState === browserWs.OPEN) browserWs.send(data);
+      if (browserWs.readyState === browserWs.OPEN) browserWs.send(data.toString());
     });
     daemonWs.on("close", () => browserWs.close());
     daemonWs.on("error", () => browserWs.close());

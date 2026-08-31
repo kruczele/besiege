@@ -19,14 +19,34 @@ interface StreamHandlers {
   onExit: Set<(exitCode: number | null) => void>;
 }
 
-const streams = new Map<number, { ws: WebSocket; handlers: StreamHandlers }>();
+interface StreamEntry {
+  ws: WebSocket;
+  handlers: StreamHandlers;
+  // A resize requested (by TerminalView's ResizeObserver, which fires as
+  // soon as the pane mounts) before the socket finishes its handshake would
+  // otherwise be silently dropped — unlike the Electron build's ws+unix
+  // connection to the daemon, this one is a real loopback TCP handshake
+  // through the web server's proxy, slow enough to lose that first resize
+  // most of the time. Stashed here and flushed once the socket opens.
+  pendingResize?: { cols: number; rows: number };
+}
+
+const streams = new Map<number, StreamEntry>();
 
 function openStream(id: number): void {
   if (streams.has(id)) return;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/api/terminals/${id}/stream`);
   const handlers: StreamHandlers = { onData: new Set(), onExit: new Set() };
-  streams.set(id, { ws, handlers });
+  const entry: StreamEntry = { ws, handlers };
+  streams.set(id, entry);
+
+  ws.onopen = () => {
+    if (entry.pendingResize) {
+      ws.send(JSON.stringify({ type: "resize", ...entry.pendingResize }));
+      entry.pendingResize = undefined;
+    }
+  };
 
   ws.onmessage = (event) => {
     let msg: unknown;
@@ -103,8 +123,13 @@ export const webApi: Api = {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
   },
   resizeTerminal: async (id, cols, rows) => {
-    const ws = streams.get(id)?.ws;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    const entry = streams.get(id);
+    if (!entry) return;
+    if (entry.ws.readyState === WebSocket.OPEN) {
+      entry.ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    } else {
+      entry.pendingResize = { cols, rows };
+    }
   },
 
   // No custom window chrome or Electron zoom API in a browser tab — App's
