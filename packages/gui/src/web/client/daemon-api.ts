@@ -55,8 +55,8 @@ export const fetchSteps = (campaignId: number) =>
 
 export const fetchTasks = (campaignId: number, stepId: number) =>
   callDaemon<TaskDefinition[]>("GET", `/campaigns/${campaignId}/steps/${stepId}/tasks`);
-export const createTask = (campaignId: number, stepId: number, name: string, context: string, since: string) =>
-  callDaemon<TaskDefinition>("POST", `/campaigns/${campaignId}/steps/${stepId}/tasks`, { name, context, since });
+export const createTask = (campaignId: number, stepId: number, name: string, context: string) =>
+  callDaemon<TaskDefinition>("POST", `/campaigns/${campaignId}/steps/${stepId}/tasks`, { name, context });
 export const retireTask = (campaignId: number, stepId: number, taskId: number) =>
   callDaemon<TaskDefinition>("POST", `/campaigns/${campaignId}/steps/${stepId}/tasks/${taskId}/retire`);
 

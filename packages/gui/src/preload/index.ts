@@ -62,9 +62,8 @@ const api = {
     stepId: number,
     name: string,
     context: string,
-    since: string,
   ): Promise<DaemonResult<TaskDefinition>> =>
-    ipcRenderer.invoke("tasks:create", campaignId, stepId, name, context, since),
+    ipcRenderer.invoke("tasks:create", campaignId, stepId, name, context),
   retireTask: (campaignId: number, stepId: number, taskId: number): Promise<DaemonResult<TaskDefinition>> =>
     ipcRenderer.invoke("tasks:retire", campaignId, stepId, taskId),
 

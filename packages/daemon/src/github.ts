@@ -10,8 +10,8 @@ interface GitHubPrState {
   lifecycle: string;
   ciStatus: string;
   ciCheckName: string | null;
-  reviewApproved: boolean;
-  unaddressedFeedback: boolean;
+  reviewState: string;
+  branchName: string | null;
 }
 
 // Maps GitHub PR state to our lifecycle enum.
@@ -22,20 +22,28 @@ function mapState(state: string, isDraft: boolean, merged: boolean): string {
   return "open";
 }
 
-// Maps GitHub review state to our review fields.
-function mapReview(reviewState: string | null): { reviewApproved: boolean; unaddressedFeedback: boolean } {
-  if (reviewState === "APPROVED") return { reviewApproved: true, unaddressedFeedback: false };
-  if (reviewState === "CHANGES_REQUESTED") return { reviewApproved: false, unaddressedFeedback: false };
-  return { reviewApproved: false, unaddressedFeedback: false };
+// Maps GitHub's aggregate review decision (accounts for required reviewers
+// and dismissed reviews, unlike a single `reviews(last: 1)` node) to our
+// review_state. REVIEW_REQUIRED and null (no reviews requested at all) are
+// both "missing" — the board only needs to know whether a human has to look.
+function mapReview(reviewDecision: string | null): string {
+  if (reviewDecision === "APPROVED") return "approved";
+  if (reviewDecision === "CHANGES_REQUESTED") return "changes-requested";
+  return "missing";
 }
 
-// Maps GitHub CI rollup state to our ci_status.
+// Maps GitHub CI rollup state to our ci_status. PENDING/EXPECTED (checks
+// queued or not yet reported) both count as "running" rather than
+// "unknown" — "unknown" is reserved for a PR with no CI configured at all
+// (null rollup), which the board treats the same as "running" (not
+// confirmed safe) but is worth keeping distinct in the data itself.
 function mapCi(rollupState: string | null, contexts: { name: string; conclusion: string | null }[]): {
   ciStatus: string;
   ciCheckName: string | null;
 } {
-  if (!rollupState || rollupState === "EXPECTED") return { ciStatus: "unknown", ciCheckName: null };
+  if (!rollupState) return { ciStatus: "unknown", ciCheckName: null };
   if (rollupState === "SUCCESS") return { ciStatus: "passing", ciCheckName: null };
+  if (rollupState === "PENDING" || rollupState === "EXPECTED") return { ciStatus: "running", ciCheckName: null };
   const failed = contexts.find((c) => c.conclusion === "FAILURE" || c.conclusion === "TIMED_OUT");
   return { ciStatus: "failing", ciCheckName: failed?.name ?? null };
 }
@@ -49,7 +57,8 @@ function buildBatchQuery(nodeIds: string[]): string {
         state
         isDraft
         merged
-        reviews(last: 1) { nodes { state } }
+        reviewDecision
+        headRefName
         commits(last: 1) {
           nodes {
             commit {
@@ -107,7 +116,8 @@ async function graphqlBatch(
         state: string;
         isDraft: boolean;
         merged: boolean;
-        reviews: { nodes: { state: string }[] };
+        reviewDecision: string | null;
+        headRefName: string;
         commits: {
           nodes: {
             commit: {
@@ -123,8 +133,7 @@ async function graphqlBatch(
       if (!pr) return;
 
       const lifecycle = mapState(pr.state, pr.isDraft, pr.merged);
-      const reviewState = pr.reviews?.nodes?.[0]?.state ?? null;
-      const { reviewApproved, unaddressedFeedback } = mapReview(reviewState);
+      const reviewState = mapReview(pr.reviewDecision);
       const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup ?? null;
       const contexts = (rollup?.contexts?.nodes ?? []).map((n) => ({
         name: n.name ?? n.context ?? "unknown",
@@ -132,7 +141,7 @@ async function graphqlBatch(
       }));
       const { ciStatus, ciCheckName } = mapCi(rollup?.state ?? null, contexts);
 
-      result.set(nodeId, { lifecycle, ciStatus, ciCheckName, reviewApproved, unaddressedFeedback });
+      result.set(nodeId, { lifecycle, ciStatus, ciCheckName, reviewState, branchName: pr.headRefName ?? null });
     });
   }
 
@@ -171,14 +180,14 @@ export async function syncPr(db: Database.Database, prId: number): Promise<void>
 
   db.prepare(
     `UPDATE prs SET lifecycle = ?, ci_status = ?, ci_check_name = ?,
-     review_approved = ?, unaddressed_feedback = ?, synced_at = ?
+     review_state = ?, branch_name = ?, synced_at = ?
      WHERE id = ?`,
   ).run(
     state.lifecycle,
     state.ciStatus,
     state.ciCheckName,
-    state.reviewApproved ? 1 : 0,
-    state.unaddressedFeedback ? 1 : 0,
+    state.reviewState,
+    state.branchName,
     new Date().toISOString(),
     pr.id,
   );
@@ -206,7 +215,7 @@ export async function syncCampaign(db: Database.Database, campaignId: string | n
 
   const update = db.prepare(
     `UPDATE prs SET lifecycle = ?, ci_status = ?, ci_check_name = ?,
-     review_approved = ?, unaddressed_feedback = ?, synced_at = ?
+     review_state = ?, branch_name = ?, synced_at = ?
      WHERE id = ?`,
   );
 
@@ -218,8 +227,8 @@ export async function syncCampaign(db: Database.Database, campaignId: string | n
         state.lifecycle,
         state.ciStatus,
         state.ciCheckName,
-        state.reviewApproved ? 1 : 0,
-        state.unaddressedFeedback ? 1 : 0,
+        state.reviewState,
+        state.branchName,
         new Date().toISOString(),
         pr.id,
       );
@@ -227,17 +236,33 @@ export async function syncCampaign(db: Database.Database, campaignId: string | n
   })();
 }
 
+// A PR that's fully green (CI passing, review approved) is as "done" as it
+// gets short of merging — polling it as often as one that's failing or
+// waiting on a re-review just burns rate limit. Anything not confirmed safe
+// (failing, running, changes-requested, or simply never synced) gets the
+// short interval instead.
+const SAFE_RESYNC_MS = 30 * 60 * 1000;
+const WATCH_RESYNC_MS = 2 * 60 * 1000;
+
 export async function syncAllActivePrs(db: Database.Database): Promise<void> {
   const token = getGitHubToken();
   if (!token) return;
+
+  const safeCutoff = new Date(Date.now() - SAFE_RESYNC_MS).toISOString();
+  const watchCutoff = new Date(Date.now() - WATCH_RESYNC_MS).toISOString();
 
   const prs = db
     .prepare(
       `SELECT id, github_node_id FROM prs
        WHERE github_node_id IS NOT NULL
-         AND lifecycle NOT IN ('merged', 'closed')`,
+         AND lifecycle NOT IN ('merged', 'closed')
+         AND (
+           synced_at IS NULL
+           OR (ci_status = 'passing' AND review_state = 'approved' AND synced_at < ?)
+           OR (NOT (ci_status = 'passing' AND review_state = 'approved') AND synced_at < ?)
+         )`,
     )
-    .all() as PrRow[];
+    .all(safeCutoff, watchCutoff) as PrRow[];
 
   if (prs.length === 0) return;
 
@@ -246,7 +271,7 @@ export async function syncAllActivePrs(db: Database.Database): Promise<void> {
 
   const update = db.prepare(
     `UPDATE prs SET lifecycle = ?, ci_status = ?, ci_check_name = ?,
-     review_approved = ?, unaddressed_feedback = ?, synced_at = ?
+     review_state = ?, branch_name = ?, synced_at = ?
      WHERE id = ?`,
   );
 
@@ -258,8 +283,8 @@ export async function syncAllActivePrs(db: Database.Database): Promise<void> {
         state.lifecycle,
         state.ciStatus,
         state.ciCheckName,
-        state.reviewApproved ? 1 : 0,
-        state.unaddressedFeedback ? 1 : 0,
+        state.reviewState,
+        state.branchName,
         new Date().toISOString(),
         pr.id,
       );

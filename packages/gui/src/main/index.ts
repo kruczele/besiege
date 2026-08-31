@@ -155,10 +155,8 @@ daemonHandle("campaigns:update", (id: number, fields: Record<string, unknown>) =
 daemonHandle("campaigns:delete", (id: number) => deleteCampaign(id));
 
 daemonHandle("tasks:list", (campaignId: number, stepId: number) => fetchTasks(campaignId, stepId));
-daemonHandle(
-  "tasks:create",
-  (campaignId: number, stepId: number, name: string, context: string, since: string) =>
-    createTask(campaignId, stepId, name, context, since),
+daemonHandle("tasks:create", (campaignId: number, stepId: number, name: string, context: string) =>
+  createTask(campaignId, stepId, name, context),
 );
 daemonHandle("tasks:retire", (campaignId: number, stepId: number, taskId: number) =>
   retireTask(campaignId, stepId, taskId),

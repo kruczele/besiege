@@ -272,21 +272,17 @@ const TOOLS = [
     name: "create_task",
     description:
       "Register a new task definition for a step — instructions that should be applied to every PR in " +
-      "that step. Any existing PR in the step created before `since` automatically gets it added as a " +
-      "pending task; PRs created after `since` should already reflect it via the primary work.",
+      "that step, effective immediately. Every existing PR in the step automatically gets it added as a " +
+      "pending task; a PR opened after this call should already reflect it via the primary work.",
     inputSchema: {
       type: "object" as const,
       properties: {
         step: { type: "string", description: "Step name within the campaign" },
         name: { type: "string", description: "Short task name" },
         context: { type: "string", description: "Full instructions for applying this task" },
-        since: {
-          type: "string",
-          description: "ISO timestamp — PRs created before this get retroactively assigned the task",
-        },
         campaign: CAMPAIGN_PROPERTY,
       },
-      required: ["step", "name", "context", "since"],
+      required: ["step", "name", "context"],
     },
   },
   {
@@ -400,16 +396,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "create_task": {
-        const { step, name: taskName, context, since } = a;
+        const { step, name: taskName, context } = a;
         const campaign = resolveCampaign(a);
-        if (!step || !taskName || !context || !since) {
-          throw new Error("step, name, context, and since are all required");
+        if (!step || !taskName || !context) {
+          throw new Error("step, name, and context are all required");
         }
         const stepId = await resolveStepId(campaign, step);
         const data = await postJson(`/campaigns/${encodeURIComponent(campaign)}/steps/${stepId}/tasks`, {
           name: taskName,
           context,
-          since,
         });
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       }

@@ -11,8 +11,8 @@ interface PrRow {
   lifecycle: string;
   ci_status: string;
   ci_check_name: string | null;
-  review_approved: number;
-  unaddressed_feedback: number;
+  review_state: string;
+  branch_name: string | null;
   synced_at: string | null;
   created_at: string;
 }
@@ -47,8 +47,8 @@ const toPr = (r: PrRow) => ({
   lifecycle: r.lifecycle,
   ciStatus: r.ci_status,
   ciCheckName: r.ci_check_name,
-  reviewApproved: Boolean(r.review_approved),
-  unaddressedFeedback: Boolean(r.unaddressed_feedback),
+  reviewState: r.review_state,
+  branchName: r.branch_name,
   syncedAt: r.synced_at,
   createdAt: r.created_at,
 });
@@ -87,11 +87,7 @@ export function registerPrRoutes(
 
       const needsMe = req.query.filter === "needs-me";
       const filterClause = needsMe
-        ? `AND (
-            p.unaddressed_feedback = 1
-            OR (p.ci_status = 'failing')
-            OR (p.lifecycle = 'approved' AND p.review_approved = 1)
-          )`
+        ? `AND (p.ci_status = 'failing' OR p.review_state = 'changes-requested')`
         : "";
       const repoClause = req.query.repo ? `AND cr.github_full_name = ?` : "";
       const params: unknown[] = [req.params.campaignId];
@@ -181,8 +177,8 @@ export function registerPrRoutes(
       lifecycle: string;
       ci_status: string;
       ci_check_name: string | null;
-      review_approved: boolean;
-      unaddressed_feedback: boolean;
+      review_state: string;
+      branch_name: string | null;
       github_pr_number: number | null;
       github_node_id: string | null;
     }>;
@@ -197,8 +193,8 @@ export function registerPrRoutes(
       "lifecycle",
       "ci_status",
       "ci_check_name",
-      "review_approved",
-      "unaddressed_feedback",
+      "review_state",
+      "branch_name",
       "github_pr_number",
       "github_node_id",
     ] as const;
