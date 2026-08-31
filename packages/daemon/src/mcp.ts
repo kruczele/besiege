@@ -48,6 +48,7 @@ interface CampaignRepo {
 interface CampaignStep {
   id: number;
   name: string;
+  stepOrder: number;
 }
 
 interface Pr {
@@ -69,11 +70,21 @@ async function resolveRepoId(campaign: string, repo: string): Promise<number> {
   return created.id;
 }
 
+// Steps register themselves the first time an agent references them by name
+// — same reasoning as resolveRepoId above: requiring a human to pre-create
+// every step (there was previously no UI or tool to do so at all) before an
+// agent can claim or register a PR against it defeats the point of an agent
+// driving a campaign end-to-end from a plain description of the work.
 async function resolveStepId(campaign: string, step: string): Promise<number> {
   const steps = await getJson<CampaignStep[]>(`/campaigns/${encodeURIComponent(campaign)}/steps`);
   const match = steps.find((s) => s.name.toLowerCase() === step.toLowerCase());
-  if (!match) throw new Error(`step '${step}' is not registered in campaign ${campaign}`);
-  return match.id;
+  if (match) return match.id;
+  const nextOrder = steps.reduce((max, s) => Math.max(max, s.stepOrder), -1) + 1;
+  const created = await postJson<CampaignStep>(`/campaigns/${encodeURIComponent(campaign)}/steps`, {
+    name: step,
+    step_order: nextOrder,
+  });
+  return created.id;
 }
 
 async function resolvePrId(
@@ -240,6 +251,24 @@ const TOOLS = [
     },
   },
   {
+    name: "create_step",
+    description:
+      "Declare a step in the campaign's pipeline (e.g. \"Bump dependency\", \"Verify\", \"Cleanup\"), so PRs " +
+      "and tasks can be registered against it. Idempotent by name — calling this again for a step that " +
+      "already exists just returns it, so it's safe to call up front for every step of a plan without " +
+      "checking first. New steps are appended after the last existing one; claim_pr/register_pr/create_task " +
+      "also auto-create a step by this same name the first time you reference it, so this is only needed " +
+      "when you want the full pipeline to show up on the campaign board before any PR exists.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string", description: "Step name" },
+        campaign: CAMPAIGN_PROPERTY,
+      },
+      required: ["name"],
+    },
+  },
+  {
     name: "create_task",
     description:
       "Register a new task definition for a step — instructions that should be applied to every PR in " +
@@ -360,6 +389,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         );
         const allFailed = outcomes.length > 0 && outcomes.every((o) => o.status === "rejected");
         return { content: [{ type: "text", text: lines.join("\n") }], isError: allFailed };
+      }
+
+      case "create_step": {
+        const { name: stepName } = a;
+        const campaign = resolveCampaign(a);
+        if (!stepName) throw new Error("name is required");
+        const stepId = await resolveStepId(campaign, stepName);
+        return { content: [{ type: "text", text: `Step '${stepName}' is registered (id ${stepId}).` }] };
       }
 
       case "create_task": {
