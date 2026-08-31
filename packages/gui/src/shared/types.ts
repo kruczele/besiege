@@ -22,6 +22,10 @@ export interface Notification {
   sessionId: string;
   cwd: string | null;
   message: string;
+  // 'hooks-missing' is a daemon-raised system notice (hook-health.ts), not
+  // relayed from an agent's Notification hook — the Inbox renders it
+  // differently (preserved formatting + a copy button for its fix snippet).
+  kind: "agent" | "hooks-missing";
   createdAt: string;
   acknowledgedAt: string | null;
 }

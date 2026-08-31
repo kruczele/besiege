@@ -574,18 +574,33 @@ function NotificationCard({
   onJump: (campaignId: number, terminalId: number) => void;
 }) {
   const title = session ? (titles[session.id] ?? session.label ?? session.agentAdapterName ?? `Terminal #${session.id}`) : null;
+  const isSystem = notification.kind === "hooks-missing";
 
   return (
     <li
-      className={`notification-card ${notification.acknowledgedAt ? "acked" : ""} ${session ? "clickable" : ""}`}
+      className={`notification-card ${isSystem ? "notification-card-system" : ""} ${notification.acknowledgedAt ? "acked" : ""} ${session ? "clickable" : ""}`}
       onClick={session ? () => onJump(session.campaignId, session.id) : undefined}
     >
-      <p className="n-message">{notification.message}</p>
+      {isSystem ? (
+        <pre className="n-message n-message-system">{notification.message}</pre>
+      ) : (
+        <p className="n-message">{notification.message}</p>
+      )}
       <div className="n-meta-row">
         <span className="n-meta">
           {title ?? notification.cwd ?? "unknown session"} · {elapsed(notification.createdAt)} ago
         </span>
         <div className="n-actions">
+          {isSystem && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                void navigator.clipboard.writeText(notification.message).catch(() => {});
+              }}
+            >
+              Copy
+            </button>
+          )}
           {!notification.acknowledgedAt && (
             <button
               onClick={(e) => {

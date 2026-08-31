@@ -363,6 +363,23 @@ export const migrations: Migration[] = [
       ALTER TABLE terminal_sessions ADD COLUMN agent_adapter_name TEXT;
     `,
   },
+  {
+    name: "0024_hook_health",
+    sql: `
+      -- Set by the SessionStart hook (routes/terminals.ts' hook-confirm
+      -- route) shortly after a Claude session actually launches, so the
+      -- daemon can tell whether Claude Code's hooks are wired up on this
+      -- machine at all — see hook-health.ts. hook_warning_sent_at guards
+      -- against re-warning about the same already-flagged session on every
+      -- health sweep.
+      ALTER TABLE terminal_sessions ADD COLUMN hook_confirmed_at TEXT;
+      ALTER TABLE terminal_sessions ADD COLUMN hook_warning_sent_at TEXT;
+      -- Distinguishes a daemon-raised system notice (e.g. hooks unwired)
+      -- from an agent-raised one (the Notification hook relay) — 'agent'
+      -- default keeps every pre-existing row's meaning unchanged.
+      ALTER TABLE notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent';
+    `,
+  },
 ];
 
 // Seeded once as a `config_rules` row (pattern '*', so it's injected into

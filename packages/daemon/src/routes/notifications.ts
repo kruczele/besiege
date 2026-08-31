@@ -6,6 +6,7 @@ interface NotificationRow {
   session_id: string;
   cwd: string | null;
   message: string;
+  kind: string;
   created_at: string;
   acknowledged_at: string | null;
 }
@@ -16,6 +17,7 @@ function toNotification(row: NotificationRow) {
     sessionId: row.session_id,
     cwd: row.cwd,
     message: row.message,
+    kind: row.kind,
     createdAt: row.created_at,
     acknowledgedAt: row.acknowledged_at,
   };
