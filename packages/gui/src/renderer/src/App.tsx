@@ -30,10 +30,12 @@ const TAB_HELPTEXT: Record<Tab, string> = {
 
 export function App({ chrome = true }: { chrome?: boolean } = {}) {
   const [tab, setTab] = useState<Tab>("campaigns");
-  // The campaign currently in focus — set by CampaignsPanel's selector, read
-  // by the main terminal area so "new terminal" knows which campaign it
-  // belongs to. Terminals are children of campaigns, so there's one shared
-  // notion of "current campaign" across the sidebar and the terminal area.
+  // The campaign currently in focus — set by CampaignsPanel's or LivePanel's
+  // selector (whichever tab was used last), read by the main terminal area
+  // so "new terminal" knows which campaign it belongs to. One shared notion
+  // of "current campaign" across the sidebar tabs and the terminal area, so
+  // switching to Army/Campaigns lands on whatever was already selected
+  // instead of resetting to the first campaign in the list.
   const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
   // Set by "Jump to agent" (Inbox, Army tab) — see TerminalsMain's
   // focusRequest prop for how the terminal area resolves this into an
@@ -89,7 +91,14 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
             {tab === "campaigns" && (
               <CampaignsPanel activeCampaignId={activeCampaignId} onSelectCampaign={setActiveCampaignId} />
             )}
-            {tab === "live" && <LivePanel onJump={jumpToSession} titles={titles} />}
+            {tab === "live" && (
+              <LivePanel
+                activeCampaignId={activeCampaignId}
+                onSelectCampaign={setActiveCampaignId}
+                onJump={jumpToSession}
+                titles={titles}
+              />
+            )}
             {tab === "rules" && <RulesPanel />}
           </div>
           <InboxPanel onJump={jumpToSession} titles={titles} />
@@ -623,24 +632,34 @@ function NotificationCard({
 // here as "Waiting on you", but the always-visible Inbox covers that
 // completely now, so this is just the one list.
 function LivePanel({
+  activeCampaignId,
+  onSelectCampaign,
   onJump,
   titles,
 }: {
+  activeCampaignId: number | null;
+  onSelectCampaign: (id: number) => void;
   onJump: (campaignId: number, terminalId: number) => void;
   titles: Record<number, string>;
 }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selectedId = activeCampaignId;
   const [claims, setClaims] = useState<ActiveClaim[]>([]);
   const [runningAgents, setRunningAgents] = useState<TerminalSession[]>([]);
 
+  // Shares App's one notion of "current campaign" with the Campaigns tab
+  // (same pattern as CampaignsPanel's reloadCampaigns) — only falls back to
+  // the first campaign when nothing is selected yet, so switching to this
+  // tab lands on whichever campaign was already active rather than always
+  // resetting to the top of the list.
   useEffect(() => {
     window.api.listCampaigns().then((res) => {
       if (res.ok && res.result.length > 0) {
         setCampaigns(res.result);
-        setSelectedId(res.result[0].id);
+        if (selectedId === null) onSelectCampaign(res.result[0].id);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -686,7 +705,7 @@ function LivePanel({
     <div className="panel">
       {campaigns.length > 1 && (
         <div className="campaign-toolbar">
-          <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={setSelectedId} />
+          <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={onSelectCampaign} />
         </div>
       )}
       {claims.length === 0 && runningAgents.length === 0 ? (
