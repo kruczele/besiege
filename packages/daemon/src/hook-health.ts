@@ -40,18 +40,10 @@ function buildHooksMissingMessage(): string {
   );
 
   return [
-    "Besiege's Claude Code hooks aren't wired up on this machine (or this " +
-      "project's .claude/settings.json) — edicts (config_rules context) and " +
-      "the attention inbox's Notification relay won't reach any Claude " +
-      "session here until they are. A session on a different machine, or a " +
-      "different project's own settings.local.json, can be fine even while " +
-      "this one isn't — this only reflects what this daemon can see.",
-    "",
-    "Paste this to an agent, or apply it yourself:",
-    "",
-    "Add the following to ~/.claude/settings.json — create the file with " +
-      '{} first if it doesn\'t exist, and merge this into any existing ' +
-      '"hooks" key rather than overwriting it:',
+    "In order for Besiege to work, its SessionStart/Notification hooks need to be registered in Claude " +
+      "Code's global config on this machine. An agent or a user needs to add the following to " +
+      "~/.claude/settings.json (create the file with {} first if it doesn't exist; merge into any " +
+      'existing "hooks" key rather than overwriting it):',
     "",
     "```json",
     settingsSnippet,
