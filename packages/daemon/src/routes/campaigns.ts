@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
+import { removeSession } from "../terminals.js";
 
 interface CampaignRow {
   id: number;
@@ -7,6 +8,7 @@ interface CampaignRow {
   description: string | null;
   default_dir: string | null;
   created_at: string;
+  archived_at: string | null;
 }
 
 interface StepRow {
@@ -30,6 +32,7 @@ const toCampaign = (r: CampaignRow) => ({
   description: r.description,
   defaultDir: r.default_dir,
   createdAt: r.created_at,
+  archivedAt: r.archived_at,
 });
 
 const toStep = (r: StepRow) => ({
@@ -49,8 +52,15 @@ const toRepo = (r: RepoRow) => ({
 
 export function registerCampaignRoutes(app: FastifyInstance, db: Database.Database) {
   // Campaigns
-  app.get("/campaigns", async () => {
-    return (db.prepare("SELECT * FROM campaigns ORDER BY id ASC").all() as CampaignRow[]).map(toCampaign);
+  // Archived campaigns are hidden by default (the switcher/list shouldn't
+  // fill up with done-with campaigns) — pass ?includeArchived=1 to see them
+  // too, used by the GUI's "show archived" toggle.
+  app.get<{ Querystring: { includeArchived?: string } }>("/campaigns", async (req) => {
+    const includeArchived = req.query.includeArchived === "1" || req.query.includeArchived === "true";
+    const rows = includeArchived
+      ? (db.prepare("SELECT * FROM campaigns ORDER BY id ASC").all() as CampaignRow[])
+      : (db.prepare("SELECT * FROM campaigns WHERE archived_at IS NULL ORDER BY id ASC").all() as CampaignRow[]);
+    return rows.map(toCampaign);
   });
 
   app.post<{ Body: { name?: string; description?: string; default_dir?: string } }>(
@@ -105,12 +115,78 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
     return toCampaign(updated);
   });
 
-  app.delete<{ Params: { id: string } }>("/campaigns/:id", async (req, reply) => {
-    const result = db.prepare("DELETE FROM campaigns WHERE id = ?").run(req.params.id);
-    if (result.changes === 0) {
+  // Archive/unarchive: reversible, doesn't touch anything underneath the
+  // campaign — just flips whether it shows up in the default list/switcher.
+  app.post<{ Params: { id: string } }>("/campaigns/:id/archive", async (req, reply) => {
+    const result = db
+      .prepare("UPDATE campaigns SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
+      .run(new Date().toISOString(), req.params.id);
+    const row = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(req.params.id) as CampaignRow | undefined;
+    if (!row) {
       reply.code(404);
       return { error: "not found" };
     }
+    if (result.changes === 0 && !row.archived_at) {
+      // Row exists but wasn't touched for a reason other than "already
+      // archived" — shouldn't happen, but don't silently report success.
+      reply.code(409);
+      return { error: "could not archive" };
+    }
+    return toCampaign(row);
+  });
+
+  app.post<{ Params: { id: string } }>("/campaigns/:id/unarchive", async (req, reply) => {
+    db.prepare("UPDATE campaigns SET archived_at = NULL WHERE id = ?").run(req.params.id);
+    const row = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(req.params.id) as CampaignRow | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return toCampaign(row);
+  });
+
+  // Permanent, cascading delete — unlike archive, this really does remove
+  // everything underneath the campaign. Foreign keys are enforced (db.ts
+  // pragma), so children must go first, in dependency order; only
+  // terminal_layouts/terminal_layout_members cascade on their own (0018).
+  // Live terminal sessions go through removeSession so their pty actually
+  // gets killed, not just the row deleted out from under it.
+  app.delete<{ Params: { id: string } }>("/campaigns/:id", async (req, reply) => {
+    const campaign = db.prepare("SELECT id FROM campaigns WHERE id = ?").get(req.params.id);
+    if (!campaign) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+
+    const sessionIds = (
+      db.prepare("SELECT id FROM terminal_sessions WHERE campaign_id = ?").all(req.params.id) as { id: number }[]
+    ).map((r) => r.id);
+    for (const id of sessionIds) removeSession(db, id);
+
+    db.transaction(() => {
+      db.prepare(
+        `DELETE FROM pr_pending_tasks WHERE
+           pr_id IN (SELECT p.id FROM prs p JOIN campaign_steps cs ON cs.id = p.step_id WHERE cs.campaign_id = ?)
+           OR task_definition_id IN (SELECT id FROM task_definitions WHERE step_id IN
+             (SELECT id FROM campaign_steps WHERE campaign_id = ?))`,
+      ).run(req.params.id, req.params.id);
+      db.prepare(
+        `DELETE FROM pr_claims WHERE pr_id IN
+           (SELECT p.id FROM prs p JOIN campaign_steps cs ON cs.id = p.step_id WHERE cs.campaign_id = ?)`,
+      ).run(req.params.id);
+      db.prepare(`DELETE FROM prs WHERE step_id IN (SELECT id FROM campaign_steps WHERE campaign_id = ?)`).run(
+        req.params.id,
+      );
+      db.prepare(
+        `DELETE FROM task_definitions WHERE step_id IN (SELECT id FROM campaign_steps WHERE campaign_id = ?)`,
+      ).run(req.params.id);
+      db.prepare("DELETE FROM failure_signatures WHERE campaign_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM terminal_layouts WHERE campaign_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM campaign_steps WHERE campaign_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM campaign_repos WHERE campaign_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM campaigns WHERE id = ?").run(req.params.id);
+    })();
+
     reply.code(204);
   });
 

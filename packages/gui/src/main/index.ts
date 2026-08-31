@@ -1,8 +1,10 @@
-import { app, BrowserWindow, ipcMain, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, nativeImage, shell } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   acknowledgeNotification,
+  archiveCampaign,
+  unarchiveCampaign,
   createCampaign,
   createConfigRule,
   createLayout,
@@ -106,6 +108,13 @@ function createWindow(): void {
   win.webContents.setZoomLevel(saved.zoomLevel);
   if (saved.maximized) win.maximize();
 
+  // PR board links (target="_blank") would otherwise spawn a bare in-app
+  // Chromium window — route them to the OS browser instead.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: "deny" };
+  });
+
   win.webContents.on("destroyed", () => terminalBridge.detachAll(win.webContents));
   win.on("maximize", () => win.webContents.send("window:maximize-changed", true));
   win.on("unmaximize", () => win.webContents.send("window:maximize-changed", false));
@@ -141,7 +150,7 @@ daemonHandle("notifications:list", (unacknowledgedOnly: boolean) =>
   fetchNotifications(unacknowledgedOnly),
 );
 daemonHandle("notifications:ack", (id: number) => acknowledgeNotification(id));
-daemonHandle("campaigns:list", fetchCampaigns);
+daemonHandle("campaigns:list", (includeArchived?: boolean) => fetchCampaigns(includeArchived));
 daemonHandle("campaigns:steps", (campaignId: number) => fetchSteps(campaignId));
 daemonHandle("campaigns:prs", (campaignId: number, needsMe: boolean) =>
   fetchCampaignPrs(campaignId, needsMe ? "needs-me" : undefined),
@@ -152,6 +161,8 @@ daemonHandle("campaigns:create", (name: string, description: string | undefined,
   createCampaign(name, description, defaultDir),
 );
 daemonHandle("campaigns:update", (id: number, fields: Record<string, unknown>) => updateCampaign(id, fields));
+daemonHandle("campaigns:archive", (id: number) => archiveCampaign(id));
+daemonHandle("campaigns:unarchive", (id: number) => unarchiveCampaign(id));
 daemonHandle("campaigns:delete", (id: number) => deleteCampaign(id));
 
 daemonHandle("tasks:list", (campaignId: number, stepId: number) => fetchTasks(campaignId, stepId));

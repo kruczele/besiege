@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
 import type { syncPr, syncCampaign } from "../github.js";
+import { fetchPrNodeId, getGitHubToken } from "../github.js";
 
 interface PrRow {
   id: number;
@@ -163,9 +164,42 @@ export function registerPrRoutes(
          lifecycle        = CASE WHEN excluded.lifecycle != 'not-started' THEN excluded.lifecycle ELSE lifecycle END`,
     ).run(step_id, repo_id, github_pr_number ?? null, github_node_id ?? null, lifecycle, now);
 
-    const row = db
+    let row = db
       .prepare("SELECT * FROM prs WHERE step_id = ? AND repo_id = ?")
       .get(step_id, repo_id) as PrRow;
+
+    // register_pr only requires a PR number, not a node id — without one,
+    // branch_name/CI/review state can never be filled in by syncPr/
+    // syncAllActivePrs (both require github_node_id). Resolve it here, once,
+    // from the (repo, number) the caller did give us, so a number-only
+    // registration still ends up fully synced instead of stuck forever.
+    if (row.github_pr_number && !row.github_node_id) {
+      const token = getGitHubToken();
+      if (token) {
+        const repoRow = db
+          .prepare("SELECT github_full_name FROM campaign_repos WHERE id = ?")
+          .get(row.repo_id) as { github_full_name: string } | undefined;
+        if (repoRow) {
+          try {
+            const resolved = await fetchPrNodeId(repoRow.github_full_name, row.github_pr_number, token);
+            if (resolved) {
+              db.prepare("UPDATE prs SET github_node_id = ?, branch_name = COALESCE(branch_name, ?) WHERE id = ?").run(
+                resolved.nodeId,
+                resolved.branchName,
+                row.id,
+              );
+              row = db.prepare("SELECT * FROM prs WHERE id = ?").get(row.id) as PrRow;
+              if (syncPrFn) await syncPrFn(db, row.id);
+              row = db.prepare("SELECT * FROM prs WHERE id = ?").get(row.id) as PrRow;
+            }
+          } catch {
+            // Best-effort — GitHub unreachable/rate-limited; next registration
+            // or manual /prs/:id/sync call will retry.
+          }
+        }
+      }
+    }
+
     reply.code(201);
     return toPr(row);
   });

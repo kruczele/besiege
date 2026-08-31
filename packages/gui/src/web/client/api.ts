@@ -76,7 +76,7 @@ export const webApi: Api = {
   listNotifications: (unacknowledgedOnly) => wrap(() => daemon.fetchNotifications(unacknowledgedOnly)),
   acknowledgeNotification: (id) => wrap(() => daemon.acknowledgeNotification(id)),
 
-  listCampaigns: () => wrap(daemon.fetchCampaigns),
+  listCampaigns: (includeArchived) => wrap(() => daemon.fetchCampaigns(includeArchived)),
   listSteps: (campaignId) => wrap(() => daemon.fetchSteps(campaignId)),
   listCampaignPrs: (campaignId, needsMe) =>
     wrap(() => daemon.fetchCampaignPrs(campaignId, needsMe ? "needs-me" : undefined)),
@@ -84,6 +84,8 @@ export const webApi: Api = {
   syncCampaign: (campaignId) => wrap(() => daemon.triggerCampaignSync(campaignId)),
   createCampaign: (name, description, defaultDir) => wrap(() => daemon.createCampaign(name, description, defaultDir)),
   updateCampaign: (id, fields) => wrap(() => daemon.updateCampaign(id, fields)),
+  archiveCampaign: (id) => wrap(() => daemon.archiveCampaign(id)),
+  unarchiveCampaign: (id) => wrap(() => daemon.unarchiveCampaign(id)),
   deleteCampaign: (id) => wrap(() => daemon.deleteCampaign(id)),
 
   listTasks: (campaignId, stepId) => wrap(() => daemon.fetchTasks(campaignId, stepId)),

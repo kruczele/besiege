@@ -38,6 +38,7 @@ export interface Campaign {
   description: string | null;
   defaultDir: string | null;
   createdAt: string;
+  archivedAt: string | null;
 }
 
 export type TerminalStatus = "active" | "exited";
