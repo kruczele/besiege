@@ -283,6 +283,23 @@ h1 {
   white-space: pre-wrap;
 }
 
+.rule-besiege-only {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.rule-besiege-only-badge {
+  font-size: 0.68rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
 .rule-edit-form {
   display: flex;
   flex-direction: column;
@@ -478,10 +495,6 @@ h1 {
   cursor: pointer;
 }
 
-.campaign-grid-wrap {
-  overflow-x: auto;
-}
-
 .pr-board {
   display: flex;
   flex-direction: column;
@@ -591,6 +604,86 @@ h1 {
   text-decoration: underline;
 }
 
+.pr-board-pr-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pr-board-pr-row-main {
+  min-width: 0;
+}
+
+.pr-board-pr-delete {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.1rem;
+  opacity: 0.5;
+}
+
+.pr-board-pr-delete:hover {
+  opacity: 1;
+  color: var(--danger);
+}
+
+.pinned-repos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+}
+
+.pinned-repo-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.pinned-repo-chip-unpinned {
+  opacity: 0.55;
+}
+
+.pinned-repo-chip-unpinned:hover {
+  opacity: 1;
+}
+
+.pinned-repo-link {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.pinned-repo-link:hover {
+  text-decoration: underline;
+}
+
+.pinned-repo-unpin {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pinned-repo-unpin:hover {
+  color: var(--accent);
+}
+
 .tasks-panel {
   margin-top: 1.5rem;
   padding-top: 1rem;
@@ -617,64 +710,6 @@ h1 {
 .tasks-panel .rule-form {
   max-width: 28rem;
 }
-
-.campaign-grid {
-  border-collapse: collapse;
-  font-size: 0.82rem;
-  min-width: 100%;
-}
-
-.campaign-grid th {
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-weight: 600;
-  padding: 0.45rem 0.75rem;
-  text-align: left;
-  border: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.campaign-grid td {
-  border: 1px solid var(--border);
-  padding: 0.35rem 0.6rem;
-  vertical-align: top;
-}
-
-.campaign-grid td.repo-name {
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  white-space: nowrap;
-  background: var(--surface);
-}
-
-.pr-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 7rem;
-}
-
-/* lifecycle badges — a deliberately separate, distinct-hue-per-status
-   system (not the brand triad) so a grid of many PRs stays scannable at a
-   glance; see the :root comment above. */
-.lc {
-  display: inline-block;
-  border-radius: 3px;
-  padding: 0.1rem 0.35rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.lc-not-started  { background: #2a2e38; color: #6b7280; }
-.lc-open         { background: #1e3a5f; color: #60a5fa; }
-.lc-approved     { background: #14432a; color: #35b37e; }
-.lc-merged       { background: #1a1a2e; color: #6c86ff; }
-.lc-closed       { background: #1f1f24; color: #6b7280; }
-.lc-changes-requested { background: #422006; color: #fb923c; }
-
-.ci-failing { border-left: 3px solid var(--danger); }
-.ci-passing { border-left: 3px solid var(--success); }
-.ci-running { border-left: 3px solid #60a5fa; }
 
 .pending-badge {
   font-size: 0.68rem;

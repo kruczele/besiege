@@ -3,6 +3,7 @@ import type {
   ActiveClaim,
   AgentAdapter,
   Campaign,
+  CampaignRepo,
   CampaignStep,
   ConfigRule,
   DaemonHealth,
@@ -21,11 +22,11 @@ const api = {
   getDaemonHealth: (): Promise<DaemonResult<DaemonHealth>> => ipcRenderer.invoke("daemon:health"),
 
   listConfigRules: (): Promise<DaemonResult<ConfigRule[]>> => ipcRenderer.invoke("config:list"),
-  createConfigRule: (pattern: string, context: string): Promise<DaemonResult<ConfigRule>> =>
-    ipcRenderer.invoke("config:create", pattern, context),
+  createConfigRule: (pattern: string, context: string, besiegeOnly?: boolean): Promise<DaemonResult<ConfigRule>> =>
+    ipcRenderer.invoke("config:create", pattern, context, besiegeOnly),
   updateConfigRule: (
     id: number,
-    fields: Partial<{ pattern: string; context: string }>,
+    fields: Partial<{ pattern: string; context: string; besiege_only: boolean }>,
   ): Promise<DaemonResult<ConfigRule>> => ipcRenderer.invoke("config:update", id, fields),
   deleteConfigRule: (id: number): Promise<DaemonResult<void>> =>
     ipcRenderer.invoke("config:delete", id),
@@ -41,8 +42,13 @@ const api = {
     ipcRenderer.invoke("campaigns:steps", campaignId),
   listCampaignPrs: (campaignId: number, needsMe: boolean): Promise<DaemonResult<PrGridRow[]>> =>
     ipcRenderer.invoke("campaigns:prs", campaignId, needsMe),
+  deletePr: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("prs:delete", id),
   listCampaignClaims: (campaignId: number): Promise<DaemonResult<ActiveClaim[]>> =>
     ipcRenderer.invoke("campaigns:claims", campaignId),
+  listRepos: (campaignId: number): Promise<DaemonResult<CampaignRepo[]>> =>
+    ipcRenderer.invoke("campaigns:repos", campaignId),
+  setRepoPinned: (campaignId: number, repoId: number, pinned: boolean): Promise<DaemonResult<CampaignRepo>> =>
+    ipcRenderer.invoke("campaigns:repos:pin", campaignId, repoId, pinned),
   syncCampaign: (campaignId: number): Promise<DaemonResult<{ queued: boolean }>> =>
     ipcRenderer.invoke("campaigns:sync", campaignId),
   createCampaign: (

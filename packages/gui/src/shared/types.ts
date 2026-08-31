@@ -14,6 +14,7 @@ export interface ConfigRule {
   id: number;
   pattern: string;
   context: string;
+  besiegeOnly: boolean;
   createdAt: string;
 }
 
@@ -28,6 +29,10 @@ export interface Notification {
   kind: "agent" | "hooks-missing";
   createdAt: string;
   acknowledgedAt: string | null;
+  // Set when a later notification from the same sessionId arrived before
+  // this one was acknowledged — the inbox only ever surfaces the latest per
+  // session, so this one is history, not something still waiting on you.
+  supersededAt: string | null;
 }
 
 export type DaemonResult<T> = { ok: true; result: T } | { ok: false; error: string };
@@ -114,6 +119,7 @@ export interface CampaignRepo {
   id: number;
   campaignId: number;
   githubFullName: string;
+  pinned: boolean;
   createdAt: string;
 }
 

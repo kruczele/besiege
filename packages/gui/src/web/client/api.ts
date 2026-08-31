@@ -69,7 +69,8 @@ export const webApi: Api = {
   getDaemonHealth: () => wrap(daemon.fetchDaemonHealth),
 
   listConfigRules: () => wrap(daemon.fetchConfigRules),
-  createConfigRule: (pattern, context) => wrap(() => daemon.createConfigRule(pattern, context)),
+  createConfigRule: (pattern, context, besiegeOnly) =>
+    wrap(() => daemon.createConfigRule(pattern, context, besiegeOnly)),
   updateConfigRule: (id, fields) => wrap(() => daemon.updateConfigRule(id, fields)),
   deleteConfigRule: (id) => wrap(() => daemon.deleteConfigRule(id)),
 
@@ -80,7 +81,10 @@ export const webApi: Api = {
   listSteps: (campaignId) => wrap(() => daemon.fetchSteps(campaignId)),
   listCampaignPrs: (campaignId, needsMe) =>
     wrap(() => daemon.fetchCampaignPrs(campaignId, needsMe ? "needs-me" : undefined)),
+  deletePr: (id) => wrap(() => daemon.deletePr(id)),
   listCampaignClaims: (campaignId) => wrap(() => daemon.fetchCampaignClaims(campaignId)),
+  listRepos: (campaignId) => wrap(() => daemon.fetchRepos(campaignId)),
+  setRepoPinned: (campaignId, repoId, pinned) => wrap(() => daemon.setRepoPinned(campaignId, repoId, pinned)),
   syncCampaign: (campaignId) => wrap(() => daemon.triggerCampaignSync(campaignId)),
   createCampaign: (name, description, defaultDir) => wrap(() => daemon.createCampaign(name, description, defaultDir)),
   updateCampaign: (id, fields) => wrap(() => daemon.updateCampaign(id, fields)),

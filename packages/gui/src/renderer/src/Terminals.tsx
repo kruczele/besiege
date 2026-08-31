@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
 import type { AgentAdapter, Campaign, PaneNode, TerminalLayout, TerminalSession } from "../../shared/types.js";
@@ -40,6 +41,9 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Default handler opens via window.open, which Electron's
+    // setWindowOpenHandler (main/index.ts) already routes to shell.openExternal.
+    term.loadAddon(new WebLinksAddon());
     term.open(container);
     fit.fit();
 

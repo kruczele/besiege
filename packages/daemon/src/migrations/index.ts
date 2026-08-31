@@ -422,6 +422,42 @@ export const migrations: Migration[] = [
       ALTER TABLE campaigns ADD COLUMN archived_at TEXT;
     `,
   },
+  {
+    name: "0028_campaign_repos_pinned",
+    sql: `
+      -- Lets the operator flag a handful of repos in a large campaign for
+      -- one-click access (GitHub page jump) instead of hunting the grid.
+      ALTER TABLE campaign_repos ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    name: "0029_config_rules_besiege_only",
+    sql: `
+      -- The SessionStart hook is registered globally (~/.claude/settings.json),
+      -- so it fires for every Claude Code session on the machine, not just
+      -- ones Besiege dispatched. Ordinary Edicts (cwd-glob rules) are meant
+      -- to apply everywhere regardless of launcher, but a rule that only
+      -- makes sense inside a Besiege session (env vars/MCP tools that won't
+      -- exist otherwise) needs to be gated on actually being one — this
+      -- flag marks which rules those are. See resolveContext in config.ts.
+      ALTER TABLE config_rules ADD COLUMN besiege_only INTEGER NOT NULL DEFAULT 0;
+    `,
+    after: (db) => {
+      db.prepare("UPDATE config_rules SET besiege_only = 1 WHERE pattern = '*' AND context = ?").run(
+        BESIEGE_ORIENTATION_RULE,
+      );
+    },
+  },
+  {
+    name: "0030_notifications_superseded_at",
+    sql: `
+      -- One agent finishing a task and immediately hitting another blocker
+      -- (or just being chatty) used to pile up several inbox rows for the
+      -- same session. Only the latest per session_id should stay "active" —
+      -- see the supersede-on-insert logic in routes/notifications.ts.
+      ALTER TABLE notifications ADD COLUMN superseded_at TEXT;
+    `,
+  },
 ];
 
 // Seeded once as a `config_rules` row (pattern '*', so it's injected into

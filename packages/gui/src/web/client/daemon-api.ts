@@ -5,6 +5,7 @@ import type {
   ActiveClaim,
   AgentAdapter,
   Campaign,
+  CampaignRepo,
   CampaignStep,
   ConfigRule,
   DaemonHealth,
@@ -30,10 +31,12 @@ async function callDaemon<T>(method: "GET" | "POST" | "DELETE" | "PATCH", path: 
 export const fetchDaemonHealth = () => callDaemon<DaemonHealth>("GET", "/health");
 
 export const fetchConfigRules = () => callDaemon<ConfigRule[]>("GET", "/config/rules");
-export const createConfigRule = (pattern: string, context: string) =>
-  callDaemon<ConfigRule>("POST", "/config/rules", { pattern, context });
-export const updateConfigRule = (id: number, fields: Partial<{ pattern: string; context: string }>) =>
-  callDaemon<ConfigRule>("PATCH", `/config/rules/${id}`, fields);
+export const createConfigRule = (pattern: string, context: string, besiegeOnly?: boolean) =>
+  callDaemon<ConfigRule>("POST", "/config/rules", { pattern, context, besiege_only: besiegeOnly });
+export const updateConfigRule = (
+  id: number,
+  fields: Partial<{ pattern: string; context: string; besiege_only: boolean }>,
+) => callDaemon<ConfigRule>("PATCH", `/config/rules/${id}`, fields);
 export const deleteConfigRule = (id: number) => callDaemon<void>("DELETE", `/config/rules/${id}`);
 
 export const fetchNotifications = (unacknowledgedOnly: boolean) =>
@@ -65,12 +68,18 @@ export const retireTask = (campaignId: number, stepId: number, taskId: number) =
 
 export const fetchCampaignPrs = (campaignId: number, filter?: "needs-me") =>
   callDaemon<PrGridRow[]>("GET", `/campaigns/${campaignId}/prs${filter ? `?filter=${filter}` : ""}`);
+export const deletePr = (id: number) => callDaemon<void>("DELETE", `/prs/${id}`);
 export const triggerCampaignSync = (campaignId: number) =>
   callDaemon<{ queued: boolean }>("POST", `/campaigns/${campaignId}/sync`);
 
 export const releasePrClaim = (prId: number) => callDaemon<void>("DELETE", `/prs/${prId}/claim`);
 export const fetchCampaignClaims = (campaignId: number) =>
   callDaemon<ActiveClaim[]>("GET", `/campaigns/${campaignId}/claims`);
+
+export const fetchRepos = (campaignId: number) =>
+  callDaemon<CampaignRepo[]>("GET", `/campaigns/${campaignId}/repos`);
+export const setRepoPinned = (campaignId: number, repoId: number, pinned: boolean) =>
+  callDaemon<CampaignRepo>("PATCH", `/campaigns/${campaignId}/repos/${repoId}`, { pinned });
 
 export const listTerminals = (campaignId: number) =>
   callDaemon<TerminalSession[]>("GET", `/campaigns/${campaignId}/terminals`);
