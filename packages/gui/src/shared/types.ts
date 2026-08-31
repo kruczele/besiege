@@ -121,13 +121,13 @@ export interface TaskDefinition {
   stepId: number;
   name: string;
   context: string;
-  since: string;
   retiredAt: string | null;
   createdAt: string;
 }
 
 export type PrLifecycle = "not-started" | "open" | "approved" | "changes-requested" | "merged" | "closed";
-export type CiStatus = "unknown" | "passing" | "failing";
+export type CiStatus = "unknown" | "running" | "passing" | "failing";
+export type ReviewState = "missing" | "changes-requested" | "approved";
 
 export interface Pr {
   id: number;
@@ -138,8 +138,11 @@ export interface Pr {
   lifecycle: PrLifecycle;
   ciStatus: CiStatus;
   ciCheckName: string | null;
-  reviewApproved: boolean;
-  unaddressedFeedback: boolean;
+  reviewState: ReviewState;
+  // The PR's head branch — lets the campaign board group PRs that share one
+  // across many repos, since a campaign typically branches identically
+  // everywhere. Null until the first sync (or if the PR has no node id yet).
+  branchName: string | null;
   syncedAt: string | null;
   createdAt: string;
 }

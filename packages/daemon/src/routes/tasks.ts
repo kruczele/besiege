@@ -16,7 +16,6 @@ const toTask = (r: TaskDefinitionRow) => ({
   stepId: r.step_id,
   name: r.name,
   context: r.context,
-  since: r.since,
   retiredAt: r.retired_at,
   createdAt: r.created_at,
 });
@@ -48,12 +47,12 @@ export function registerTaskRoutes(app: FastifyInstance, db: Database.Database) 
 
   app.post<{
     Params: { campaignId: string; stepId: string };
-    Body: { name?: string; context?: string; since?: string };
+    Body: { name?: string; context?: string };
   }>("/campaigns/:campaignId/steps/:stepId/tasks", async (req, reply) => {
-    const { name, context, since } = req.body ?? {};
-    if (!name?.trim() || !context?.trim() || !since?.trim()) {
+    const { name, context } = req.body ?? {};
+    if (!name?.trim() || !context?.trim()) {
       reply.code(400);
-      return { error: "name, context, and since are required" };
+      return { error: "name and context are required" };
     }
     const step = db
       .prepare("SELECT id FROM campaign_steps WHERE id = ? AND campaign_id = ?")
@@ -63,21 +62,25 @@ export function registerTaskRoutes(app: FastifyInstance, db: Database.Database) 
       return { error: "step not found" };
     }
 
+    // A task always applies "now" — every PR already in this step gets it
+    // retroactively, and any PR opened after should already reflect it via
+    // the primary work. There is no such thing as scheduling a task for
+    // later; `since` (the column, kept as-is) is just this timestamp.
     const now = new Date().toISOString();
     const taskInfo = db
       .prepare(
         "INSERT INTO task_definitions (step_id, name, context, since, created_at) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(req.params.stepId, name.trim(), context.trim(), since.trim(), now);
+      .run(req.params.stepId, name.trim(), context.trim(), now, now);
 
     const taskId = taskInfo.lastInsertRowid;
 
-    // Retroactive assignment: any PR in this step created before `since` gets this task as pending.
+    // Retroactive assignment: every PR already in this step gets this task as pending.
     const prsToAssign = db
       .prepare(
         "SELECT id FROM prs WHERE step_id = ? AND created_at < ?",
       )
-      .all(req.params.stepId, since) as { id: number }[];
+      .all(req.params.stepId, now) as { id: number }[];
 
     const insertPending = db.prepare(
       "INSERT OR IGNORE INTO pr_pending_tasks (pr_id, task_definition_id, created_at) VALUES (?, ?, ?)",

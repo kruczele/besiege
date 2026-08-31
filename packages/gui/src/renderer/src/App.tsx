@@ -206,6 +206,7 @@ function lcClass(lifecycle: string) {
 function ciClass(ciStatus: string) {
   if (ciStatus === "failing") return "ci-failing";
   if (ciStatus === "passing") return "ci-passing";
+  if (ciStatus === "running") return "ci-running";
   return "";
 }
 
@@ -216,6 +217,135 @@ function elapsed(iso: string) {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+// ── PR board ──────────────────────────────────────────────────────────────────
+
+// Rows/cols ordered most- to least-urgent — CI unknown (no checks
+// configured at all) counts as "running" here: neither is confirmed safe,
+// and the distinction isn't worth a 4th row on this board.
+const CI_BUCKETS: { key: string; label: string; match: (p: PrGridRow) => boolean }[] = [
+  { key: "failing", label: "CI failing", match: (p) => p.ciStatus === "failing" },
+  { key: "running", label: "CI running", match: (p) => p.ciStatus === "running" || p.ciStatus === "unknown" },
+  { key: "passing", label: "CI green", match: (p) => p.ciStatus === "passing" },
+];
+
+const REVIEW_BUCKETS: { key: string; label: string; match: (p: PrGridRow) => boolean }[] = [
+  { key: "changes-requested", label: "Changes requested", match: (p) => p.reviewState === "changes-requested" },
+  { key: "missing", label: "Missing review", match: (p) => p.reviewState === "missing" },
+  { key: "approved", label: "Approved", match: (p) => p.reviewState === "approved" },
+];
+
+// A campaign typically branches identically across every repo it touches —
+// grouping by that branch name is what lets "40 PRs, same branch" collapse
+// into one line instead of 40.
+function groupByBranch(prs: PrGridRow[]): { branch: string; prs: PrGridRow[] }[] {
+  const map = new Map<string, PrGridRow[]>();
+  for (const p of prs) {
+    const key = p.branchName ?? "(branch unknown)";
+    const list = map.get(key);
+    if (list) list.push(p);
+    else map.set(key, [p]);
+  }
+  return Array.from(map, ([branch, groupPrs]) => ({ branch, prs: groupPrs })).sort(
+    (a, b) => b.prs.length - a.prs.length || a.branch.localeCompare(b.branch),
+  );
+}
+
+// A 2D CI×review breakdown of every PR in the campaign — the thing the
+// repo×step grid below never showed at all (it only ever surfaced lifecycle
+// + CI, never review state). Every cell starts expanded except the fully
+// "safe" one (green + approved): that's the "good to go" pile the operator
+// explicitly doesn't need to look at, so it collapses to a count.
+function PrBoard({ prs }: { prs: PrGridRow[] }) {
+  const [collapsedCells, setCollapsedCells] = useState<Set<string>>(new Set(["passing|approved"]));
+  const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set());
+
+  const toggleCell = (key: string) =>
+    setCollapsedCells((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const toggleBranch = (key: string) =>
+    setExpandedBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  return (
+    <div className="pr-board">
+      {CI_BUCKETS.map((ci) => {
+        const ciPrs = prs.filter(ci.match);
+        if (ciPrs.length === 0) return null;
+        return (
+          <div key={ci.key} className="pr-board-row">
+            <h3 className="pr-board-row-title">
+              {ci.label} <span className="pr-board-count">{ciPrs.length}</span>
+            </h3>
+            <div className="pr-board-row-cells">
+              {REVIEW_BUCKETS.map((rv) => {
+                const cellPrs = ciPrs.filter(rv.match);
+                if (cellPrs.length === 0) return null;
+                const cellKey = `${ci.key}|${rv.key}`;
+                const isSafe = cellKey === "passing|approved";
+                const expanded = !collapsedCells.has(cellKey);
+                return (
+                  <div
+                    key={rv.key}
+                    className={`pr-board-cell ${isSafe ? "pr-board-cell-safe" : "pr-board-cell-attention"}`}
+                  >
+                    <button className="pr-board-cell-header" onClick={() => toggleCell(cellKey)}>
+                      <span>
+                        {expanded ? "▾" : "▸"} {rv.label}
+                      </span>
+                      <span className="pr-board-count">{cellPrs.length}</span>
+                    </button>
+                    {expanded && (
+                      <ul className="pr-board-branch-list">
+                        {groupByBranch(cellPrs).map((g) => {
+                          const branchKey = `${cellKey}|${g.branch}`;
+                          const branchExpanded = expandedBranches.has(branchKey);
+                          return (
+                            <li key={g.branch}>
+                              <button className="pr-board-branch-header" onClick={() => toggleBranch(branchKey)}>
+                                <span>
+                                  {branchExpanded ? "▾" : "▸"} <code>{g.branch}</code>
+                                </span>
+                                <span className="pr-board-count">{g.prs.length}</span>
+                              </button>
+                              {branchExpanded && (
+                                <ul className="pr-board-repo-list">
+                                  {g.prs.map((p) => (
+                                    <li key={p.id}>
+                                      {p.repoName}
+                                      {p.githubPrNumber != null && (
+                                        <span className="pr-board-pr-number"> #{p.githubPrNumber}</span>
+                                      )}
+                                      {p.pendingTasksCount > 0 && (
+                                        <span className="pending-badge"> +{p.pendingTasksCount} pending</span>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // Button-row campaign switcher shared by CampaignsPanel and LivePanel —
@@ -300,7 +430,6 @@ function CampaignsPanel({
   const selectedId = activeCampaignId;
   const [steps, setSteps] = useState<CampaignStep[]>([]);
   const [prs, setPrs] = useState<PrGridRow[]>([]);
-  const [needsMe, setNeedsMe] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
 
@@ -330,7 +459,7 @@ function CampaignsPanel({
     const load = async () => {
       const [stepsRes, prsRes] = await Promise.all([
         window.api.listSteps(selectedId),
-        window.api.listCampaignPrs(selectedId, needsMe),
+        window.api.listCampaignPrs(selectedId, false),
       ]);
       if (cancelled) return;
       if (stepsRes.ok) setSteps(stepsRes.result);
@@ -343,7 +472,7 @@ function CampaignsPanel({
       cancelled = true;
       clearInterval(id);
     };
-  }, [selectedId, needsMe]);
+  }, [selectedId]);
 
   const handleSync = async () => {
     if (selectedId === null) return;
@@ -370,14 +499,6 @@ function CampaignsPanel({
     <div className="panel">
       <div className="campaign-toolbar">
         <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={onSelectCampaign} />
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={needsMe}
-            onChange={(e) => setNeedsMe(e.target.checked)}
-          />
-          Needs me
-        </label>
         <button onClick={handleSync} disabled={syncing}>
           {syncing ? "Syncing…" : "Sync GitHub"}
         </button>
@@ -388,11 +509,13 @@ function CampaignsPanel({
 
       {showNewForm && <NewCampaignForm onCreated={handleCreated} />}
 
-      {repos.length === 0 ? (
-        <p className="status status-pending">
-          {needsMe ? "Nothing needs attention." : "No PRs registered yet."}
-        </p>
+      {prs.length === 0 ? (
+        <p className="status status-pending">No PRs registered yet.</p>
       ) : (
+        <PrBoard prs={prs} />
+      )}
+
+      {repos.length === 0 ? null : (
         <div className="campaign-grid-wrap">
           <table className="campaign-grid">
             <thead>
@@ -444,9 +567,9 @@ function CampaignsPanel({
 function TasksPanel({ campaignId, steps }: { campaignId: number; steps: CampaignStep[] }) {
   const [selectedStepId, setSelectedStepId] = useState<number | null>(null);
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
+  const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [context, setContext] = useState("");
-  const [since, setSince] = useState(() => new Date().toISOString().slice(0, 10));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -468,13 +591,14 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
     e.preventDefault();
     if (selectedStepId === null) return;
     setError(null);
-    const res = await window.api.createTask(campaignId, selectedStepId, name, context, new Date(since).toISOString());
+    const res = await window.api.createTask(campaignId, selectedStepId, name, context);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setName("");
     setContext("");
+    setShowForm(false);
     reload(selectedStepId);
   };
 
@@ -518,23 +642,33 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
         ))}
       </ul>
 
-      <form className="rule-form" onSubmit={submit}>
-        <input placeholder="task name" value={name} onChange={(e) => setName(e.target.value)} />
-        <textarea
-          placeholder="instructions to apply to every PR in this step"
-          value={context}
-          onChange={(e) => setContext(e.target.value)}
-        />
-        <input
-          type="date"
-          value={since}
-          onChange={(e) => setSince(e.target.value)}
-          title="Existing PRs in this step created before this date get the task added retroactively"
-        />
-        <button type="submit" disabled={!name.trim() || !context.trim()}>
-          Add task
-        </button>
-      </form>
+      {showForm ? (
+        <form className="rule-form" onSubmit={submit}>
+          <input autoFocus placeholder="task name" value={name} onChange={(e) => setName(e.target.value)} />
+          <textarea
+            placeholder="instructions to apply to every PR in this step"
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+          />
+          <div className="rule-item-actions">
+            <button type="submit" disabled={!name.trim() || !context.trim()}>
+              Add task
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                setName("");
+                setContext("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button onClick={() => setShowForm(true)}>Add task</button>
+      )}
     </div>
   );
 }

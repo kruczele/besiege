@@ -380,6 +380,23 @@ export const migrations: Migration[] = [
       ALTER TABLE notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent';
     `,
   },
+  {
+    name: "0025_pr_review_state_and_branch",
+    sql: `
+      -- review_approved/unaddressed_feedback (0008) never actually
+      -- distinguished "changes requested" from "no review yet" — both
+      -- mapped to the same false/false, and unaddressed_feedback was never
+      -- written as true by anything. review_state replaces both with
+      -- GitHub's actual reviewDecision (approved / changes-requested /
+      -- missing), which does make that distinction. The old columns are
+      -- left in place (additive migrations only) but no longer written to.
+      ALTER TABLE prs ADD COLUMN review_state TEXT NOT NULL DEFAULT 'missing';
+      -- The PR's head branch name — lets the campaign board group PRs that
+      -- share one across many repos (a campaign typically uses the same
+      -- branch name everywhere) instead of listing each repo separately.
+      ALTER TABLE prs ADD COLUMN branch_name TEXT;
+    `,
+  },
 ];
 
 // Seeded once as a `config_rules` row (pattern '*', so it's injected into

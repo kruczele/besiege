@@ -87,8 +87,7 @@ export const webApi: Api = {
   deleteCampaign: (id) => wrap(() => daemon.deleteCampaign(id)),
 
   listTasks: (campaignId, stepId) => wrap(() => daemon.fetchTasks(campaignId, stepId)),
-  createTask: (campaignId, stepId, name, context, since) =>
-    wrap(() => daemon.createTask(campaignId, stepId, name, context, since)),
+  createTask: (campaignId, stepId, name, context) => wrap(() => daemon.createTask(campaignId, stepId, name, context)),
   retireTask: (campaignId, stepId, taskId) => wrap(() => daemon.retireTask(campaignId, stepId, taskId)),
 
   releaseClaim: (prId) => wrap(() => daemon.releasePrClaim(prId)),
