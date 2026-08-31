@@ -2,8 +2,8 @@
 // `pnpm web` — one-shot convenience command: ensures a daemon is up (starting
 // one from a fresh build only if none is running — an already-running
 // daemon is left alone, since restarting it would kill any live agent
-// terminal sessions it's tracking), builds the web UI, serves it, and opens
-// a browser tab. For active development on the web UI itself, use
+// terminal sessions it's tracking), builds the web UI, serves it, and prints
+// the URL to open. For active development on the web UI itself, use
 // `pnpm dev:webclient` + `pnpm dev:webserver` instead (rebuild on save).
 import { execSync, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -15,15 +15,6 @@ const port = process.env.BESIEGE_WEB_PORT ?? "4571";
 
 function run(cmd) {
   execSync(cmd, { stdio: "inherit", cwd: repoRoot });
-}
-
-function openBrowser(url) {
-  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  try {
-    spawn(cmd, [url], { detached: true, stdio: "ignore" }).unref();
-  } catch {
-    console.log(`Could not auto-open a browser — open ${url} manually.`);
-  }
 }
 
 async function ensureDaemon() {
@@ -78,8 +69,7 @@ async function main() {
     server.kill();
     process.exit(1);
   }
-  console.log(`Opening ${url}`);
-  openBrowser(url);
+  console.log(`Web UI available at ${url}`);
 
   const shutdown = () => {
     server.kill("SIGTERM");

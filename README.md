@@ -54,7 +54,7 @@ Same UI, reachable from an ordinary browser instead of the Electron window.
 pnpm web
 ```
 
-One-shot convenience command: starts a daemon if none is already running (leaves an already-running one alone — restarting it would kill any live agent terminal sessions it's tracking), builds the web UI, serves it on `http://127.0.0.1:4571`, and opens it in your browser. Ctrl+C stops the web server only.
+One-shot convenience command: starts a daemon if none is already running (leaves an already-running one alone — restarting it would kill any live agent terminal sessions it's tracking), builds the web UI, serves it on `http://127.0.0.1:4571`, and prints the URL. Ctrl+C stops the web server only.
 
 If you need the daemon restarted on latest source (e.g. after a daemon-side change, or if it wasn't running via `tsx watch`), use `pnpm daemon:reload` — this **does** end any live agent terminal sessions the daemon was tracking.
 
