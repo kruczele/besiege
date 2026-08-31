@@ -256,6 +256,24 @@ export function registerPrRoutes(
     return toPr(updated);
   });
 
+  // Drops a PR from tracking entirely — e.g. a stale registration, or one an
+  // agent registered against the wrong (repo, step) slot. Foreign keys are
+  // enforced (db.ts), so children have to go first; there's no cascade since
+  // nothing else deletes a PR row today.
+  app.delete<{ Params: { id: string } }>("/prs/:id", async (req, reply) => {
+    const pr = db.prepare("SELECT id FROM prs WHERE id = ?").get(req.params.id);
+    if (!pr) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    db.transaction(() => {
+      db.prepare("DELETE FROM pr_pending_tasks WHERE pr_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM pr_claims WHERE pr_id = ?").run(req.params.id);
+      db.prepare("DELETE FROM prs WHERE id = ?").run(req.params.id);
+    })();
+    reply.code(204);
+  });
+
   // Pending tasks for a PR, joined with task name and context for the agent.
   app.get<{ Params: { id: string }; Querystring: { includeClosed?: string } }>(
     "/prs/:id/pending-tasks",

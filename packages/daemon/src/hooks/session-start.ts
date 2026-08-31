@@ -34,8 +34,9 @@ async function main() {
   }
 
   try {
+    const besiegeSession = besiegeSessionId ? "1" : "0";
     const { context } = await getJson<{ context: string }>(
-      `/config/resolve?cwd=${encodeURIComponent(cwd)}`,
+      `/config/resolve?cwd=${encodeURIComponent(cwd)}&besiegeSession=${besiegeSession}`,
     );
     if (!context) {
       console.log("{}");

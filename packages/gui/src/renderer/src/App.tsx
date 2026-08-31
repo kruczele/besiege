@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Copy, Minus, Square, X } from "lucide-react";
+import { Copy, ExternalLink, Minus, Pin, PinOff, Square, X } from "lucide-react";
 import type {
   ActiveClaim,
   Campaign,
+  CampaignRepo,
   CampaignStep,
   ConfigRule,
   DaemonHealth,
@@ -189,27 +190,6 @@ function StatusPanel() {
   );
 }
 
-// ── Campaign grid ─────────────────────────────────────────────────────────────
-
-function lcClass(lifecycle: string) {
-  const map: Record<string, string> = {
-    "not-started": "lc-not-started",
-    open: "lc-open",
-    approved: "lc-approved",
-    merged: "lc-merged",
-    closed: "lc-closed",
-    "changes-requested": "lc-changes-requested",
-  };
-  return `lc ${map[lifecycle] ?? "lc-not-started"}`;
-}
-
-function ciClass(ciStatus: string) {
-  if (ciStatus === "failing") return "ci-failing";
-  if (ciStatus === "passing") return "ci-passing";
-  if (ciStatus === "running") return "ci-running";
-  return "";
-}
-
 function elapsed(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
   const s = Math.floor(ms / 1000);
@@ -257,9 +237,21 @@ function groupByBranch(prs: PrGridRow[]): { branch: string; prs: PrGridRow[] }[]
 // + CI, never review state). Every cell starts expanded except the fully
 // "safe" one (green + approved): that's the "good to go" pile the operator
 // explicitly doesn't need to look at, so it collapses to a count.
-function PrBoard({ prs }: { prs: PrGridRow[] }) {
+function PrBoard({ prs, onDeleted }: { prs: PrGridRow[]; onDeleted: (id: number) => void }) {
   const [collapsedCells, setCollapsedCells] = useState<Set<string>>(new Set(["passing|approved"]));
   const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set());
+
+  const handleDelete = async (id: number) => {
+    const res = await window.api.deletePr(id);
+    if (res.ok) onDeleted(id);
+  };
+
+  // Merged/closed PRs stop being synced (github.ts treats them as terminal),
+  // so their ci_status/review_state are frozen at whatever they were on the
+  // last sync before merge — e.g. a PR merged while a non-required check was
+  // still running stays "CI running" forever otherwise. This board is a
+  // triage view of what's still actionable, so terminal PRs don't belong.
+  const active = prs.filter((p) => p.lifecycle !== "merged" && p.lifecycle !== "closed");
 
   const toggleCell = (key: string) =>
     setCollapsedCells((prev) => {
@@ -278,8 +270,9 @@ function PrBoard({ prs }: { prs: PrGridRow[] }) {
 
   return (
     <div className="pr-board">
+      {active.length === 0 && <p className="status status-pending">No open PRs need attention.</p>}
       {CI_BUCKETS.map((ci) => {
-        const ciPrs = prs.filter(ci.match);
+        const ciPrs = active.filter(ci.match);
         if (ciPrs.length === 0) return null;
         return (
           <div key={ci.key} className="pr-board-row">
@@ -320,24 +313,36 @@ function PrBoard({ prs }: { prs: PrGridRow[] }) {
                               {branchExpanded && (
                                 <ul className="pr-board-repo-list">
                                   {g.prs.map((p) => (
-                                    <li key={p.id}>
-                                      {p.githubPrNumber != null ? (
-                                        <a
-                                          className="pr-board-pr-link"
-                                          href={`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          {p.repoName}
-                                          <span className="pr-board-pr-number"> #{p.githubPrNumber}</span>
-                                        </a>
-                                      ) : (
-                                        p.repoName
-                                      )}
-                                      {p.pendingTasksCount > 0 && (
-                                        <span className="pending-badge"> +{p.pendingTasksCount} pending</span>
-                                      )}
+                                    <li key={p.id} className="pr-board-pr-row">
+                                      <span className="pr-board-pr-row-main">
+                                        {p.githubPrNumber != null ? (
+                                          <a
+                                            className="pr-board-pr-link"
+                                            href={`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            {p.repoName}
+                                            <span className="pr-board-pr-number"> #{p.githubPrNumber}</span>
+                                          </a>
+                                        ) : (
+                                          p.repoName
+                                        )}
+                                        {p.pendingTasksCount > 0 && (
+                                          <span className="pending-badge"> +{p.pendingTasksCount} pending</span>
+                                        )}
+                                      </span>
+                                      <button
+                                        className="pr-board-pr-delete"
+                                        title="Stop tracking this PR"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDelete(p.id);
+                                        }}
+                                      >
+                                        <X size={12} />
+                                      </button>
                                     </li>
                                   ))}
                                 </ul>
@@ -440,6 +445,7 @@ function CampaignsPanel({
   const selectedId = activeCampaignId;
   const [steps, setSteps] = useState<CampaignStep[]>([]);
   const [prs, setPrs] = useState<PrGridRow[]>([]);
+  const [repos, setRepos] = useState<CampaignRepo[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [showNewForm, setShowNewForm] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -471,13 +477,15 @@ function CampaignsPanel({
     let cancelled = false;
 
     const load = async () => {
-      const [stepsRes, prsRes] = await Promise.all([
+      const [stepsRes, prsRes, reposRes] = await Promise.all([
         window.api.listSteps(selectedId),
         window.api.listCampaignPrs(selectedId, false),
+        window.api.listRepos(selectedId),
       ]);
       if (cancelled) return;
       if (stepsRes.ok) setSteps(stepsRes.result);
       if (prsRes.ok) setPrs(prsRes.result);
+      if (reposRes.ok) setRepos(reposRes.result);
     };
 
     load();
@@ -493,6 +501,12 @@ function CampaignsPanel({
     setSyncing(true);
     await window.api.syncCampaign(selectedId);
     setTimeout(() => setSyncing(false), 1500);
+  };
+
+  const toggleRepoPinned = async (repo: CampaignRepo) => {
+    if (selectedId === null) return;
+    const res = await window.api.setRepoPinned(selectedId, repo.id, !repo.pinned);
+    if (res.ok) setRepos((prev) => prev.map((r) => (r.id === repo.id ? res.result : r)));
   };
 
   const selectedCampaign = campaigns.find((c) => c.id === selectedId) ?? null;
@@ -541,11 +555,6 @@ function CampaignsPanel({
     }
   };
 
-  // Build repo list + lookup: "repoName::stepId" → PrGridRow
-  const repos = Array.from(new Set(prs.map((p) => p.repoName))).sort();
-  const prIndex = new Map<string, PrGridRow>();
-  for (const p of prs) prIndex.set(`${p.repoName}::${p.stepId}`, p);
-
   if (campaigns.length === 0) {
     return (
       <div className="panel">
@@ -590,51 +599,37 @@ function CampaignsPanel({
 
       {showNewForm && <NewCampaignForm onCreated={handleCreated} />}
 
+      {repos.length > 0 && (
+        <div className="pinned-repos">
+          {[...repos]
+            .sort((a, b) => Number(b.pinned) - Number(a.pinned))
+            .map((r) => (
+              <div key={r.id} className={`pinned-repo-chip ${r.pinned ? "" : "pinned-repo-chip-unpinned"}`}>
+                <a
+                  className="pinned-repo-link"
+                  href={`https://github.com/${r.githubFullName}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink size={13} />
+                  {r.githubFullName}
+                </a>
+                <button
+                  className="pinned-repo-unpin"
+                  title={r.pinned ? "Unpin" : "Pin for quick access"}
+                  onClick={() => toggleRepoPinned(r)}
+                >
+                  {r.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                </button>
+              </div>
+            ))}
+        </div>
+      )}
+
       {prs.length === 0 ? (
         <p className="status status-pending">No PRs registered yet.</p>
       ) : (
-        <PrBoard prs={prs} />
-      )}
-
-      {repos.length === 0 ? null : (
-        <div className="campaign-grid-wrap">
-          <table className="campaign-grid">
-            <thead>
-              <tr>
-                <th>Repo</th>
-                {steps.map((s) => (
-                  <th key={s.id}>{s.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {repos.map((repo) => (
-                <tr key={repo}>
-                  <td className="repo-name">{repo}</td>
-                  {steps.map((step) => {
-                    const pr = prIndex.get(`${repo}::${step.id}`);
-                    if (!pr) return <td key={step.id} />;
-                    return (
-                      <td key={step.id} className={ciClass(pr.ciStatus)}>
-                        <div className="pr-cell">
-                          <span className={lcClass(pr.lifecycle)}>{pr.lifecycle}</span>
-                          {pr.ciStatus === "failing" && pr.ciCheckName && (
-                            <span style={{ fontSize: "0.7rem", color: "#e5645a" }}>
-                              ✕ {pr.ciCheckName}
-                            </span>
-                          )}
-                          {pr.pendingTasksCount > 0 && (
-                            <span className="pending-badge">+{pr.pendingTasksCount} pending</span>
-                          )}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PrBoard prs={prs} onDeleted={(id) => setPrs((prev) => prev.filter((p) => p.id !== id))} />
       )}
 
       {selectedId !== null && <TasksPanel campaignId={selectedId} steps={steps} />}
@@ -980,10 +975,12 @@ function RulesPanel() {
   const [rules, setRules] = useState<ConfigRule[] | null>(null);
   const [pattern, setPattern] = useState("");
   const [context, setContext] = useState("");
+  const [besiegeOnly, setBesiegeOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editPattern, setEditPattern] = useState("");
   const [editContext, setEditContext] = useState("");
+  const [editBesiegeOnly, setEditBesiegeOnly] = useState(false);
 
   const reload = async () => {
     const res = await window.api.listConfigRules();
@@ -998,13 +995,14 @@ function RulesPanel() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    const res = await window.api.createConfigRule(pattern, context);
+    const res = await window.api.createConfigRule(pattern, context, besiegeOnly);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setPattern("");
     setContext("");
+    setBesiegeOnly(false);
     reload();
   };
 
@@ -1018,6 +1016,7 @@ function RulesPanel() {
     setEditingId(rule.id);
     setEditPattern(rule.pattern);
     setEditContext(rule.context);
+    setEditBesiegeOnly(rule.besiegeOnly);
   };
 
   const cancelEdit = () => setEditingId(null);
@@ -1029,6 +1028,7 @@ function RulesPanel() {
     const res = await window.api.updateConfigRule(editingId, {
       pattern: editPattern,
       context: editContext,
+      besiege_only: editBesiegeOnly,
     });
     if (!res.ok) {
       setError(res.error);
@@ -1051,6 +1051,14 @@ function RulesPanel() {
           value={context}
           onChange={(e) => setContext(e.target.value)}
         />
+        <label className="rule-besiege-only">
+          <input
+            type="checkbox"
+            checked={besiegeOnly}
+            onChange={(e) => setBesiegeOnly(e.target.checked)}
+          />
+          Besiege-only (skip this rule for sessions Besiege didn't dispatch)
+        </label>
         <button type="submit">Add rule</button>
       </form>
       {error && <p className="status status-down">{error}</p>}
@@ -1079,12 +1087,21 @@ function RulesPanel() {
                   value={editContext}
                   onChange={(e) => setEditContext(e.target.value)}
                 />
+                <label className="rule-besiege-only">
+                  <input
+                    type="checkbox"
+                    checked={editBesiegeOnly}
+                    onChange={(e) => setEditBesiegeOnly(e.target.checked)}
+                  />
+                  Besiege-only
+                </label>
               </form>
             </li>
           ) : (
             <li key={rule.id} className="rule-item">
               <div className="rule-item-row">
                 <code>{rule.pattern}</code>
+                {rule.besiegeOnly && <span className="rule-besiege-only-badge">Besiege-only</span>}
                 <div className="rule-item-actions">
                   <button onClick={() => startEdit(rule)}>Edit</button>
                   <button onClick={() => remove(rule.id)}>Delete</button>

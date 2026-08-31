@@ -78,11 +78,13 @@ export const fetchDaemonHealth = () => callDaemon<DaemonHealth>("GET", "/health"
 
 export const fetchConfigRules = () => callDaemon<ConfigRule[]>("GET", "/config/rules");
 
-export const createConfigRule = (pattern: string, context: string) =>
-  callDaemon<ConfigRule>("POST", "/config/rules", { pattern, context });
+export const createConfigRule = (pattern: string, context: string, besiegeOnly?: boolean) =>
+  callDaemon<ConfigRule>("POST", "/config/rules", { pattern, context, besiege_only: besiegeOnly });
 
-export const updateConfigRule = (id: number, fields: Partial<{ pattern: string; context: string }>) =>
-  callDaemon<ConfigRule>("PATCH", `/config/rules/${id}`, fields);
+export const updateConfigRule = (
+  id: number,
+  fields: Partial<{ pattern: string; context: string; besiege_only: boolean }>,
+) => callDaemon<ConfigRule>("PATCH", `/config/rules/${id}`, fields);
 
 export const deleteConfigRule = (id: number) => callDaemon<void>("DELETE", `/config/rules/${id}`);
 
@@ -123,6 +125,8 @@ export const createRepo = (campaignId: number, githubFullName: string) =>
   callDaemon<CampaignRepo>("POST", `/campaigns/${campaignId}/repos`, { github_full_name: githubFullName });
 export const deleteRepo = (campaignId: number, repoId: number) =>
   callDaemon<void>("DELETE", `/campaigns/${campaignId}/repos/${repoId}`);
+export const setRepoPinned = (campaignId: number, repoId: number, pinned: boolean) =>
+  callDaemon<CampaignRepo>("PATCH", `/campaigns/${campaignId}/repos/${repoId}`, { pinned });
 
 // Task definitions
 export const fetchTasks = (campaignId: number, stepId: number) =>
@@ -158,6 +162,7 @@ export const registerPr = (
   });
 export const updatePr = (id: number, fields: Partial<Pr>) =>
   callDaemon<Pr>("PATCH", `/prs/${id}`, fields);
+export const deletePr = (id: number) => callDaemon<void>("DELETE", `/prs/${id}`);
 export const fetchPendingTasks = (prId: number) =>
   callDaemon<PrPendingTask[]>("GET", `/prs/${prId}/pending-tasks`);
 export const closePendingTask = (prId: number, taskDefinitionId: number) =>

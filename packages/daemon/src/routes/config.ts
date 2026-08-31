@@ -6,21 +6,34 @@ interface ConfigRuleRow {
   id: number;
   pattern: string;
   context: string;
+  besiege_only: number;
   created_at: string;
 }
 
 function toRule(row: ConfigRuleRow) {
-  return { id: row.id, pattern: row.pattern, context: row.context, createdAt: row.created_at };
+  return {
+    id: row.id,
+    pattern: row.pattern,
+    context: row.context,
+    besiegeOnly: row.besiege_only === 1,
+    createdAt: row.created_at,
+  };
 }
 
-export function resolveContext(db: Database.Database, cwd: string) {
+// besiegeSession: whether the caller confirmed this SessionStart fired for a
+// session Besiege itself dispatched (BESIEGE_SESSION_ID present) — a rule
+// flagged besiege_only is skipped otherwise, since its content (env vars,
+// MCP tools) refers to things that plain non-Besiege session won't have.
+export function resolveContext(db: Database.Database, cwd: string, besiegeSession: boolean) {
   const rows = db.prepare("SELECT * FROM config_rules ORDER BY id ASC").all() as ConfigRuleRow[];
   // Bare "*" is documented as "always match" — but in real glob semantics
   // (minimatch, bash, gitignore) a single "*" never spans "/" the way a
   // multi-segment cwd needs, so it has to be special-cased rather than
   // left to minimatch. Every other pattern goes through minimatch as-is.
   const matched = rows.filter(
-    (row) => row.pattern === "*" || minimatch(cwd, row.pattern, { dot: true }),
+    (row) =>
+      (row.pattern === "*" || minimatch(cwd, row.pattern, { dot: true })) &&
+      (row.besiege_only === 0 || besiegeSession),
   );
   return {
     context: matched.map((row) => row.context).join("\n\n"),
@@ -34,25 +47,28 @@ export function registerConfigRoutes(app: FastifyInstance, db: Database.Database
     return rows.map(toRule);
   });
 
-  app.post<{ Body: { pattern?: string; context?: string } }>("/config/rules", async (req, reply) => {
-    const { pattern, context } = req.body ?? {};
-    if (!pattern?.trim() || !context?.trim()) {
-      reply.code(400);
-      return { error: "pattern and context are both required" };
-    }
-    const info = db
-      .prepare("INSERT INTO config_rules (pattern, context, created_at) VALUES (?, ?, ?)")
-      .run(pattern.trim(), context.trim(), new Date().toISOString());
-    const row = db
-      .prepare("SELECT * FROM config_rules WHERE id = ?")
-      .get(info.lastInsertRowid) as ConfigRuleRow;
-    reply.code(201);
-    return toRule(row);
-  });
+  app.post<{ Body: { pattern?: string; context?: string; besiege_only?: boolean } }>(
+    "/config/rules",
+    async (req, reply) => {
+      const { pattern, context, besiege_only } = req.body ?? {};
+      if (!pattern?.trim() || !context?.trim()) {
+        reply.code(400);
+        return { error: "pattern and context are both required" };
+      }
+      const info = db
+        .prepare("INSERT INTO config_rules (pattern, context, besiege_only, created_at) VALUES (?, ?, ?, ?)")
+        .run(pattern.trim(), context.trim(), besiege_only ? 1 : 0, new Date().toISOString());
+      const row = db
+        .prepare("SELECT * FROM config_rules WHERE id = ?")
+        .get(info.lastInsertRowid) as ConfigRuleRow;
+      reply.code(201);
+      return toRule(row);
+    },
+  );
 
   app.patch<{
     Params: { id: string };
-    Body: Partial<{ pattern: string; context: string }>;
+    Body: Partial<{ pattern: string; context: string; besiege_only: boolean }>;
   }>("/config/rules/:id", async (req, reply) => {
     const rule = db.prepare("SELECT * FROM config_rules WHERE id = ?").get(req.params.id) as
       | ConfigRuleRow
@@ -62,12 +78,13 @@ export function registerConfigRoutes(app: FastifyInstance, db: Database.Database
       return { error: "not found" };
     }
 
+    const body = req.body ?? {};
     const allowed = ["pattern", "context"] as const;
     const updates: string[] = [];
     const values: unknown[] = [];
 
     for (const key of allowed) {
-      const value = (req.body ?? {})[key];
+      const value = body[key];
       if (value === undefined) continue;
       if (!value.trim()) {
         reply.code(400);
@@ -75,6 +92,11 @@ export function registerConfigRoutes(app: FastifyInstance, db: Database.Database
       }
       updates.push(`${key} = ?`);
       values.push(value.trim());
+    }
+
+    if (body.besiege_only !== undefined) {
+      updates.push("besiege_only = ?");
+      values.push(body.besiege_only ? 1 : 0);
     }
 
     if (updates.length === 0) {
@@ -98,11 +120,11 @@ export function registerConfigRoutes(app: FastifyInstance, db: Database.Database
     reply.code(204);
   });
 
-  app.get<{ Querystring: { cwd?: string } }>("/config/resolve", async (req, reply) => {
+  app.get<{ Querystring: { cwd?: string; besiegeSession?: string } }>("/config/resolve", async (req, reply) => {
     if (!req.query.cwd) {
       reply.code(400);
       return { error: "cwd query param is required" };
     }
-    return resolveContext(db, req.query.cwd);
+    return resolveContext(db, req.query.cwd, req.query.besiegeSession === "1");
   });
 }

@@ -15,6 +15,7 @@ import {
   deleteTerminal,
   fetchAgentAdapters,
   fetchCampaignClaims,
+  deletePr,
   fetchCampaignPrs,
   fetchCampaigns,
   fetchConfigRules,
@@ -22,6 +23,7 @@ import {
   createTask,
   fetchLayouts,
   fetchNotifications,
+  fetchRepos,
   fetchSteps,
   fetchTasks,
   getTerminalByAgentSession,
@@ -29,6 +31,7 @@ import {
   listTerminals,
   releasePrClaim,
   retireTask,
+  setRepoPinned,
   triggerCampaignSync,
   updateCampaign,
   updateConfigRule,
@@ -143,7 +146,9 @@ function daemonHandle<T>(channel: string, fn: (...args: any[]) => Promise<T>) {
 
 daemonHandle("daemon:health", fetchDaemonHealth);
 daemonHandle("config:list", fetchConfigRules);
-daemonHandle("config:create", (pattern: string, context: string) => createConfigRule(pattern, context));
+daemonHandle("config:create", (pattern: string, context: string, besiegeOnly?: boolean) =>
+  createConfigRule(pattern, context, besiegeOnly),
+);
 daemonHandle("config:update", (id: number, fields: Record<string, unknown>) => updateConfigRule(id, fields));
 daemonHandle("config:delete", (id: number) => deleteConfigRule(id));
 daemonHandle("notifications:list", (unacknowledgedOnly: boolean) =>
@@ -155,7 +160,12 @@ daemonHandle("campaigns:steps", (campaignId: number) => fetchSteps(campaignId));
 daemonHandle("campaigns:prs", (campaignId: number, needsMe: boolean) =>
   fetchCampaignPrs(campaignId, needsMe ? "needs-me" : undefined),
 );
+daemonHandle("prs:delete", (id: number) => deletePr(id));
 daemonHandle("campaigns:claims", (campaignId: number) => fetchCampaignClaims(campaignId));
+daemonHandle("campaigns:repos", (campaignId: number) => fetchRepos(campaignId));
+daemonHandle("campaigns:repos:pin", (campaignId: number, repoId: number, pinned: boolean) =>
+  setRepoPinned(campaignId, repoId, pinned),
+);
 daemonHandle("campaigns:sync", (campaignId: number) => triggerCampaignSync(campaignId));
 daemonHandle("campaigns:create", (name: string, description: string | undefined, defaultDir: string | undefined) =>
   createCampaign(name, description, defaultDir),

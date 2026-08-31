@@ -23,6 +23,7 @@ interface RepoRow {
   id: number;
   campaign_id: number;
   github_full_name: string;
+  pinned: number;
   created_at: string;
 }
 
@@ -47,6 +48,7 @@ const toRepo = (r: RepoRow) => ({
   id: r.id,
   campaignId: r.campaign_id,
   githubFullName: r.github_full_name,
+  pinned: r.pinned === 1,
   createdAt: r.created_at,
 });
 
@@ -304,6 +306,25 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
         }
         throw err;
       }
+    },
+  );
+
+  app.patch<{ Params: { campaignId: string; repoId: string }; Body: { pinned?: boolean } }>(
+    "/campaigns/:campaignId/repos/:repoId",
+    async (req, reply) => {
+      if (typeof req.body?.pinned !== "boolean") {
+        reply.code(400);
+        return { error: "pinned (boolean) is required" };
+      }
+      const result = db
+        .prepare("UPDATE campaign_repos SET pinned = ? WHERE id = ? AND campaign_id = ?")
+        .run(req.body.pinned ? 1 : 0, req.params.repoId, req.params.campaignId);
+      if (result.changes === 0) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      const row = db.prepare("SELECT * FROM campaign_repos WHERE id = ?").get(req.params.repoId) as RepoRow;
+      return toRepo(row);
     },
   );
 

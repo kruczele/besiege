@@ -13,7 +13,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { deleteJson, getJson, postJson } from "./hooks/client.js";
+import { deleteJson, getJson, patchJson, postJson } from "./hooks/client.js";
 import { socketPath } from "./paths.js";
 
 const server = new Server(
@@ -251,6 +251,22 @@ const TOOLS = [
     },
   },
   {
+    name: "pin_repo",
+    description:
+      "Pin a repo in the campaign for one-click access from the GUI (a quick-open bar linking straight to " +
+      "its GitHub page). Use this for repos that matter most to keep an eye on in a campaign spanning many " +
+      "repos — e.g. the one with the actual behavior change, versus repos only touched for a mechanical bump.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        repo: { type: "string", description: 'GitHub full name, e.g. "org/repo"' },
+        pinned: { type: "boolean", description: "true to pin (default), false to unpin" },
+        campaign: CAMPAIGN_PROPERTY,
+      },
+      required: ["repo"],
+    },
+  },
+  {
     name: "create_step",
     description:
       "Declare a step in the campaign's pipeline (e.g. \"Bump dependency\", \"Verify\", \"Cleanup\"), so PRs " +
@@ -385,6 +401,19 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         );
         const allFailed = outcomes.length > 0 && outcomes.every((o) => o.status === "rejected");
         return { content: [{ type: "text", text: lines.join("\n") }], isError: allFailed };
+      }
+
+      case "pin_repo": {
+        const campaign = resolveCampaign(a);
+        const { repo, pinned } = (args ?? {}) as { repo?: string; pinned?: boolean };
+        if (!repo) throw new Error("repo is required");
+        const repoId = await resolveRepoId(campaign, repo);
+        await patchJson(`/campaigns/${encodeURIComponent(campaign)}/repos/${repoId}`, {
+          pinned: pinned ?? true,
+        });
+        return {
+          content: [{ type: "text", text: `${repo} is now ${pinned === false ? "unpinned" : "pinned"}.` }],
+        };
       }
 
       case "create_step": {
