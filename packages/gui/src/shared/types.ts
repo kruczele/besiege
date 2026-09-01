@@ -75,12 +75,16 @@ export interface AgentAdapter {
   resumeFlag: string | null;
 }
 
-// A pane grid is an arbitrary tmux-style binary split tree rather than a
-// flat, fixed-size square grid: a leaf is one pane (empty, or holding a
-// terminal session); a split is a row/col division of two child nodes at a
-// given ratio. Mirrored (duplicated, not shared — different runtimes) in
-// packages/daemon/src/layout-tree.ts, which owns the authoritative pure
-// tree-manipulation functions server-side.
+// A pane grid is a tree that strictly alternates row-lists and col-lists: a
+// leaf is one pane (empty, or holding a terminal session); a split is an
+// ordered, flat list of >= 2 same-orientation children (all "row" siblings
+// side by side, or all "col" siblings stacked), each with a size (fraction of
+// the split, summing to 1). Splitting a pane in the same direction as its
+// immediate parent appends a flat sibling there instead of nesting; splitting
+// in the other direction wraps just that pane in a new nested split — so a
+// child split's dir is never equal to its parent's. Mirrored (duplicated, not
+// shared — different runtimes) in packages/daemon/src/layout-tree.ts, which
+// owns the authoritative pure tree-manipulation functions server-side.
 export interface PaneLeaf {
   type: "leaf";
   id: string;
@@ -91,9 +95,8 @@ export interface PaneSplit {
   type: "split";
   id: string;
   dir: "row" | "col";
-  ratio: number;
-  a: PaneNode;
-  b: PaneNode;
+  children: PaneNode[];
+  sizes: number[];
 }
 
 export type PaneNode = PaneLeaf | PaneSplit;

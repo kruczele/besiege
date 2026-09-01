@@ -31,6 +31,13 @@ On top of that: running many concurrent Claude Code sessions in terminals means 
 
 The daemon is the single source of truth. The GUI, its web UI, and the TUI are all thin clients over its Unix socket API — no orchestration logic lives in any front-end.
 
+Each machine's daemon can optionally defer to another machine's over the
+network (e.g. a laptop preferring an always-on box's daemon over Tailscale
+when it's reachable, falling back to its own local DB otherwise) — see
+[`packages/daemon`](packages/daemon)'s "Remote peer" section. This is
+transparent to every client above: they always just talk to their own
+machine's Unix socket.
+
 ## Packages
 
 | Package | Description |

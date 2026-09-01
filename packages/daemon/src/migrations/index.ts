@@ -458,7 +458,65 @@ export const migrations: Migration[] = [
       ALTER TABLE notifications ADD COLUMN superseded_at TEXT;
     `,
   },
+  {
+    name: "0031_pane_tree_flat_splits",
+    sql: "-- data-only migration, see convertLegacyPaneTree below (applied via `after`)",
+    after: (db) => {
+      const layouts = db.prepare("SELECT id, layout_tree FROM terminal_layouts").all() as {
+        id: number;
+        layout_tree: string;
+      }[];
+      const update = db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?");
+      for (const { id, layout_tree } of layouts) {
+        if (!layout_tree) continue;
+        update.run(JSON.stringify(convertLegacyPaneTree(JSON.parse(layout_tree))), id);
+      }
+    },
+  },
 ];
+
+// Pre-0031, a split was a binary { dir, ratio, a, b } node (nesting two
+// children at a time), so repeated same-direction splits produced a
+// left/right-leaning chain rather than one flat row/col. This converts a
+// tree in that shape into 0031's flat { dir, children, sizes } shape,
+// merging any run of same-dir splits into a single flat list (weights
+// distributed proportionally down the old chain) so the result matches what
+// splitPane would have produced under the new model all along.
+interface LegacyPaneLeaf {
+  type: "leaf";
+  id: string;
+  sessionId: number | null;
+}
+interface LegacyPaneSplit {
+  type: "split";
+  id: string;
+  dir: "row" | "col";
+  ratio: number;
+  a: LegacyPaneNode;
+  b: LegacyPaneNode;
+}
+type LegacyPaneNode = LegacyPaneLeaf | LegacyPaneSplit;
+
+function convertLegacyPaneTree(node: LegacyPaneNode): unknown {
+  if (node.type === "leaf") return node;
+
+  const flatChildren: unknown[] = [];
+  const flatSizes: number[] = [];
+  const flatten = (child: LegacyPaneNode, weight: number) => {
+    if (child.type === "split" && child.dir === node.dir) {
+      flatten(child.a, weight * child.ratio);
+      flatten(child.b, weight * (1 - child.ratio));
+    } else {
+      flatChildren.push(convertLegacyPaneTree(child));
+      flatSizes.push(weight);
+    }
+  };
+  flatten(node.a, node.ratio);
+  flatten(node.b, 1 - node.ratio);
+
+  const total = flatSizes.reduce((sum, s) => sum + s, 0) || 1;
+  return { type: "split", id: node.id, dir: node.dir, children: flatChildren, sizes: flatSizes.map((s) => s / total) };
+}
 
 // Seeded once as a `config_rules` row (pattern '*', so it's injected into
 // every session's SessionStart additionalContext regardless of cwd) —
