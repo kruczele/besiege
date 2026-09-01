@@ -2,7 +2,7 @@
 // shared: different runtime/build target) packages/daemon/src/layout-tree.ts,
 // which owns the authoritative versions used for server-side persistence and
 // the boot-time resume rewrite.
-import type { PaneLeaf, PaneNode } from "../../shared/types.js";
+import type { PaneLeaf, PaneNode, PaneSplit } from "../../shared/types.js";
 
 export function emptyLeaf(): PaneLeaf {
   return { type: "leaf", id: crypto.randomUUID(), sessionId: null };
@@ -14,18 +14,27 @@ export function emptyTree(): PaneNode {
 
 export function leavesInOrder(node: PaneNode): PaneLeaf[] {
   if (node.type === "leaf") return [node];
-  return [...leavesInOrder(node.a), ...leavesInOrder(node.b)];
+  return node.children.flatMap(leavesInOrder);
 }
 
 export function findLeaf(node: PaneNode, targetId: string): PaneLeaf | null {
   if (node.type === "leaf") return node.id === targetId ? node : null;
-  return findLeaf(node.a, targetId) ?? findLeaf(node.b, targetId);
+  for (const child of node.children) {
+    const found = findLeaf(child, targetId);
+    if (found) return found;
+  }
+  return null;
 }
 
-// Splits the leaf `targetId` into a two-pane split (the target keeps its
-// session, the new sibling starts empty). Returns the new tree plus the new
-// empty leaf's id (so the caller can focus it), or null if targetId wasn't
-// found in this tree.
+function equalSizes(count: number): number[] {
+  return Array(count).fill(1 / count);
+}
+
+// Splits the leaf `targetId`. If its immediate parent already runs in `dir`,
+// the new empty leaf is appended as a flat sibling there (equal-sizing the
+// whole row/col); otherwise `targetId` is wrapped in a new nested split of
+// two equal children. Returns the new tree plus the new empty leaf's id (so
+// the caller can focus it), or null if targetId wasn't found in this tree.
 export function splitPane(
   node: PaneNode,
   targetId: string,
@@ -34,37 +43,69 @@ export function splitPane(
   if (node.type === "leaf") {
     if (node.id !== targetId) return null;
     const sibling = emptyLeaf();
-    return {
-      tree: { type: "split", id: crypto.randomUUID(), dir, ratio: 0.5, a: node, b: sibling },
-      newLeafId: sibling.id,
-    };
+    const split: PaneSplit = { type: "split", id: crypto.randomUUID(), dir, children: [node, sibling], sizes: [0.5, 0.5] };
+    return { tree: split, newLeafId: sibling.id };
   }
-  const left = splitPane(node.a, targetId, dir);
-  if (left) return { tree: { ...node, a: left.tree }, newLeafId: left.newLeafId };
-  const right = splitPane(node.b, targetId, dir);
-  if (right) return { tree: { ...node, b: right.tree }, newLeafId: right.newLeafId };
+
+  const idx = node.children.findIndex((c) => c.type === "leaf" && c.id === targetId);
+  if (idx !== -1) {
+    if (node.dir === dir) {
+      const sibling = emptyLeaf();
+      const children = [...node.children.slice(0, idx + 1), sibling, ...node.children.slice(idx + 1)];
+      return { tree: { ...node, children, sizes: equalSizes(children.length) }, newLeafId: sibling.id };
+    }
+    const sibling = emptyLeaf();
+    const wrapped: PaneSplit = {
+      type: "split",
+      id: crypto.randomUUID(),
+      dir,
+      children: [node.children[idx], sibling],
+      sizes: [0.5, 0.5],
+    };
+    const children = [...node.children];
+    children[idx] = wrapped;
+    return { tree: { ...node, children }, newLeafId: sibling.id };
+  }
+
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    if (child.type !== "split") continue;
+    const result = splitPane(child, targetId, dir);
+    if (result) {
+      const children = [...node.children];
+      children[i] = result.tree;
+      return { tree: { ...node, children }, newLeafId: result.newLeafId };
+    }
+  }
   return null;
 }
 
-// Removes the leaf `targetId`, collapsing its parent split into just the
-// sibling. Returns null if the whole tree collapsed away (targetId was the
-// tree's only leaf) so the caller can decide what replaces it.
+// Removes the leaf `targetId`, collapsing its parent split into just its
+// remaining children (or, if only one remains, into that child directly —
+// which itself may cascade a grandparent's collapse). Remaining siblings'
+// sizes are rescaled proportionally, not reset to equal. Returns null if the
+// whole tree collapsed away (targetId was the tree's only leaf) so the caller
+// can decide what replaces it.
 export function closePane(node: PaneNode, targetId: string): PaneNode | null {
   if (node.type === "leaf") return node.id === targetId ? null : node;
-  const a = closePane(node.a, targetId);
-  const b = closePane(node.b, targetId);
-  if (a === null) return b;
-  if (b === null) return a;
-  return { ...node, a, b };
+  const survivors: { child: PaneNode; size: number }[] = [];
+  node.children.forEach((child, i) => {
+    const result = closePane(child, targetId);
+    if (result !== null) survivors.push({ child: result, size: node.sizes[i] });
+  });
+  if (survivors.length === 0) return null;
+  if (survivors.length === 1) return survivors[0].child;
+  const total = survivors.reduce((sum, s) => sum + s.size, 0);
+  return { ...node, children: survivors.map((s) => s.child), sizes: survivors.map((s) => s.size / total) };
 }
 
 export function setPaneSession(node: PaneNode, targetId: string, sessionId: number): PaneNode {
   if (node.type === "leaf") return node.id === targetId ? { ...node, sessionId } : node;
-  return { ...node, a: setPaneSession(node.a, targetId, sessionId), b: setPaneSession(node.b, targetId, sessionId) };
+  return { ...node, children: node.children.map((c) => setPaneSession(c, targetId, sessionId)) };
 }
 
-export function setRatio(node: PaneNode, splitId: string, ratio: number): PaneNode {
+export function setSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {
   if (node.type === "leaf") return node;
-  if (node.id === splitId) return { ...node, ratio };
-  return { ...node, a: setRatio(node.a, splitId, ratio), b: setRatio(node.b, splitId, ratio) };
+  if (node.id === splitId) return { ...node, sizes };
+  return { ...node, children: node.children.map((c) => setSizes(c, splitId, sizes)) };
 }

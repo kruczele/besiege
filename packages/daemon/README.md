@@ -14,6 +14,41 @@ pnpm --filter daemon build   # tsc -> dist/
 pnpm --filter daemon start   # node dist/index.js
 ```
 
+## Remote peer (multi-machine setups, e.g. over Tailscale)
+
+Every client (GUI, web UI, hooks) always talks to this machine's own
+`daemon.sock` — that never changes. In front of it sits a small dispatcher
+(`src/dispatcher.ts`) that can optionally forward everything through to
+another machine's daemon instead of serving from this machine's own DB, so a
+laptop's daemon can transparently defer to an always-on box's while it's
+reachable, and fall back to its own local DB the moment it isn't. There's no
+sync/merge of the two datasets — whichever one is currently being served is
+the sole source of truth for that moment; data written locally while the
+peer is unreachable stays local only.
+
+- On the machine that should act as the shared source (the always-on box),
+  set `BESIEGE_TCP_PORT` (and `BESIEGE_TCP_HOST`, typically that machine's
+  Tailscale IP — there's no default beyond `127.0.0.1`, so exposure is
+  opt-in and explicit). This also authenticates requests: a random bearer
+  token is generated on first run and persisted to
+  `$BESIEGE_STATE_DIR/tcp-token` (`chmod 600`) — `cat` it to hand to a peer.
+  **The Tailscale network boundary alone is not treated as sufficient auth**
+  — anything that can reach the TCP listener still needs the token, since
+  the daemon can execute arbitrary shell commands.
+- On a machine that should defer to that source, set `BESIEGE_PRIMARY_URL`
+  (e.g. `http://100.x.y.z:4570`) and `BESIEGE_PRIMARY_TOKEN` (the value from
+  the primary's `tcp-token` file). This machine keeps running its own local
+  daemon/DB the whole time — it's just preferred over whenever the primary
+  answers a `/health` check (polled every ~3s, short timeout, fails over
+  immediately rather than waiting out the interval if a proxied request
+  itself errors).
+- Terminal sessions (PTYs) are spawned wherever the request actually lands —
+  so while a follower is deferring to the primary, agent shells run and keep
+  running on the primary/always-on box, not the follower.
+- Never bind `BESIEGE_TCP_HOST` beyond your own tailnet (no `0.0.0.0`, no
+  port-forwarding) — the token is defense in depth on top of the Tailscale
+  boundary, not a substitute for it.
+
 ## Wiring Claude Code hooks
 
 Config injection and the notification inbox are both driven by Claude

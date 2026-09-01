@@ -5,7 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
 import type { AgentAdapter, Campaign, PaneNode, TerminalLayout, TerminalSession } from "../../shared/types.js";
-import { closePane, emptyTree, leavesInOrder, setPaneSession, setRatio, splitPane } from "./pane-tree.js";
+import { closePane, emptyTree, leavesInOrder, setPaneSession, setSizes, splitPane } from "./pane-tree.js";
 
 const POLL_SESSIONS = 3000;
 
@@ -183,8 +183,8 @@ function PaneView({
   onClosePane,
   onLaunch,
   onResume,
-  onRatioChange,
-  onRatioCommit,
+  onSizesChange,
+  onSizesCommit,
 }: {
   node: PaneNode;
   sessions: TerminalSession[];
@@ -197,8 +197,8 @@ function PaneView({
   onClosePane: (paneId: string, sessionId?: number) => void;
   onLaunch: (paneId: string, adapterName: string | undefined, yolo: boolean, extraArgs: string) => void;
   onResume: (paneId: string, terminalId: number) => void;
-  onRatioChange: (splitId: string, ratio: number) => void;
-  onRatioCommit: (splitId: string, ratio: number) => void;
+  onSizesChange: (splitId: string, sizes: number[]) => void;
+  onSizesCommit: (splitId: string, sizes: number[]) => void;
 }) {
   if (node.type === "split") {
     return (
@@ -214,8 +214,8 @@ function PaneView({
         onClosePane={onClosePane}
         onLaunch={onLaunch}
         onResume={onResume}
-        onRatioChange={onRatioChange}
-        onRatioCommit={onRatioCommit}
+        onSizesChange={onSizesChange}
+        onSizesCommit={onSizesCommit}
       />
     );
   }
@@ -268,28 +268,42 @@ function PaneView({
   );
 }
 
+// The minimum share (of the split's total) either side of a divider is
+// allowed to shrink to while dragging.
+const MIN_PANE_SIZE = 0.08;
+
 function PaneSplitView(props: Parameters<typeof PaneView>[0] & { node: Extract<PaneNode, { type: "split" }> }) {
   const { node } = props;
   const containerRef = useRef<HTMLDivElement>(null);
+  const isRow = node.dir === "row";
 
-  const startDrag = (e: React.MouseEvent) => {
+  // Dragging the divider between children[i] and children[i+1] only ever
+  // trades size between those two neighbors — every other child's share
+  // stays fixed, same as a tmux/VS Code split resize.
+  const startDrag = (i: number) => (e: React.MouseEvent) => {
     e.preventDefault();
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
-    const isRow = node.dir === "row";
-    let latestRatio = node.ratio;
+    const before = node.sizes.slice(0, i).reduce((sum, s) => sum + s, 0);
+    const span = node.sizes[i] + node.sizes[i + 1];
+    let latestSizes = node.sizes;
 
     const onMove = (ev: MouseEvent) => {
       const pos = isRow ? ev.clientX - rect.left : ev.clientY - rect.top;
       const size = isRow ? rect.width : rect.height;
-      latestRatio = Math.min(0.85, Math.max(0.15, pos / size));
-      props.onRatioChange(node.id, latestRatio);
+      const frac = Math.min(before + span - MIN_PANE_SIZE, Math.max(before + MIN_PANE_SIZE, pos / size));
+      latestSizes = node.sizes.map((s, idx) => {
+        if (idx === i) return frac - before;
+        if (idx === i + 1) return before + span - frac;
+        return s;
+      });
+      props.onSizesChange(node.id, latestSizes);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      props.onRatioCommit(node.id, latestRatio);
+      props.onSizesCommit(node.id, latestSizes);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -297,13 +311,14 @@ function PaneSplitView(props: Parameters<typeof PaneView>[0] & { node: Extract<P
 
   return (
     <div ref={containerRef} className={`pane-split pane-split-${node.dir}`}>
-      <div className="pane-split-child" style={{ flexBasis: `${node.ratio * 100}%` }}>
-        <PaneView {...props} node={node.a} />
-      </div>
-      <div className={`pane-divider pane-divider-${node.dir}`} onMouseDown={startDrag} />
-      <div className="pane-split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}>
-        <PaneView {...props} node={node.b} />
-      </div>
+      {node.children.flatMap((child, i) => [
+        ...(i > 0
+          ? [<div key={`divider-${child.id}`} className={`pane-divider pane-divider-${node.dir}`} onMouseDown={startDrag(i - 1)} />]
+          : []),
+        <div key={child.id} className="pane-split-child" style={{ flexBasis: `${node.sizes[i] * 100}%` }}>
+          <PaneView {...props} node={child} />
+        </div>,
+      ])}
     </div>
   );
 }
@@ -499,17 +514,17 @@ export function TerminalsMain({
     persistTree(activeLayout.id, setPaneSession(activeLayout.tree, paneId, res.result.id));
   };
 
-  const handleRatioChange = (splitId: string, ratio: number) => {
+  const handleSizesChange = (splitId: string, sizes: number[]) => {
     draggingRef.current = true;
     if (activeLayoutId === null) return;
-    setLayouts((prev) => prev.map((l) => (l.id === activeLayoutId ? { ...l, tree: setRatio(l.tree, splitId, ratio) } : l)));
+    setLayouts((prev) => prev.map((l) => (l.id === activeLayoutId ? { ...l, tree: setSizes(l.tree, splitId, sizes) } : l)));
   };
 
-  const handleRatioCommit = (splitId: string, ratio: number) => {
+  const handleSizesCommit = (splitId: string, sizes: number[]) => {
     draggingRef.current = false;
     const layout = layoutsRef.current.find((l) => l.id === activeLayoutId);
     if (!layout) return;
-    persistTree(layout.id, setRatio(layout.tree, splitId, ratio));
+    persistTree(layout.id, setSizes(layout.tree, splitId, sizes));
   };
 
   const handleNewTab = async () => {
@@ -651,8 +666,8 @@ export function TerminalsMain({
             onClosePane={handleClosePane}
             onLaunch={handleLaunch}
             onResume={handleResume}
-            onRatioChange={handleRatioChange}
-            onRatioCommit={handleRatioCommit}
+            onSizesChange={handleSizesChange}
+            onSizesCommit={handleSizesCommit}
           />
         </div>
       ) : (
