@@ -16,6 +16,19 @@ export interface AgentConfig {
   mcpConfigFlag?: string;
   sessionIdFlag?: string;
   resumeFlag?: string;
+  // For CLIs with no per-launch --mcp-config-style flag (e.g. agy, where
+  // MCP servers are a persistent named registry) — an argv template run
+  // once before spawn to (idempotently) register Besiege's MCP server,
+  // instead of pointing the launch itself at a config file. {execPath} and
+  // {mcpEntryPoint} get substituted, same spirit as {path}/{sessionId}
+  // elsewhere. See ensureMcpRegistered in terminals.ts.
+  mcpRegisterCommand?: string;
+  // For CLIs with no way to pre-assign/learn a conversation id at launch
+  // (e.g. agy) — path to a JSON file (map of absolute cwd -> conversation
+  // id) that gets a fresh entry shortly after an interactive session
+  // starts, polled post-spawn to discover the id for resumeFlag. See
+  // terminals.ts. "~" is expanded the same way cwd is.
+  sessionIdFromWorkspaceCache?: string;
 }
 
 // Same anchor logic as terminals.ts's MCP_ENTRY_POINT: this module runs as

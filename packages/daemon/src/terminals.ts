@@ -2,12 +2,13 @@ import * as pty from "@lydell/node-pty";
 import type { IPty } from "@lydell/node-pty";
 import type Database from "better-sqlite3";
 import type { WebSocket } from "ws";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findAgentConfig } from "./agent-config.js";
+import { findAgentConfig, type AgentConfig } from "./agent-config.js";
 import { stripInheritedAgentEnv } from "./env.js";
 import { stateDir } from "./paths.js";
 
@@ -30,6 +31,10 @@ export interface TerminalSessionRow {
   yolo: number;
   extra_args: string | null;
   agent_session_id: string | null;
+  // Only set for adapters that can't pre-assign a conversation id (agy) —
+  // see sessionIdFromWorkspaceCache below. NULL for every other adapter;
+  // resume call sites fall back to agent_session_id in that case.
+  resume_session_id: string | null;
 }
 
 // Shared across every session — the besiege MCP server is a single stdio
@@ -64,6 +69,72 @@ function ensureMcpConfig(): string {
     ),
   );
   return MCP_CONFIG_PATH;
+}
+
+// For CLIs where MCP is a persistent named registry rather than a
+// per-launch flag (agy's `agy mcp add <name> <cmd> [args]`, "add or
+// update") — run the adapter's registration command once before spawn.
+// Same "regenerate every call, never trust a prior run" rationale as
+// ensureMcpConfig; fails open (a broken/missing binary here must not block
+// the session itself from starting, it just starts without Besiege's MCP
+// tools).
+function ensureMcpRegistered(adapter: AgentConfig): void {
+  if (!adapter.mcpRegisterCommand) return;
+  try {
+    const argv = splitArgs(adapter.mcpRegisterCommand).map((token) =>
+      token.replace("{execPath}", process.execPath).replace("{mcpEntryPoint}", MCP_ENTRY_POINT),
+    );
+    execFileSync(adapter.binary, argv, { timeout: 5000, stdio: "ignore" });
+  } catch {
+    // Binary missing, registry unreachable, etc — spawn proceeds without it.
+  }
+}
+
+// Best-effort read of a workspace-keyed session-cache file (agy's
+// last_conversations.json: absolute cwd -> conversation id). Missing file /
+// malformed JSON / wrong shape all resolve to "no entry" rather than
+// throwing — this is undocumented third-party state, never trusted to be
+// well-formed.
+function readWorkspaceCacheEntry(path: string, cwd: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(expandHome(path), "utf8"));
+    if (parsed && typeof parsed === "object") {
+      const value = (parsed as Record<string, unknown>)[cwd];
+      if (typeof value === "string") return value;
+    }
+  } catch {
+    // no file yet, bad JSON, etc.
+  }
+  return undefined;
+}
+
+// For adapters with sessionIdFromWorkspaceCache set (agy): the CLI mints
+// its own conversation id and only surfaces it, undocumented, via a
+// workspace-path-keyed cache file it writes shortly after an interactive
+// session starts in that cwd. Poll for a *change* from whatever was there
+// before spawn (not just presence — a stale entry from an earlier, unrelated
+// session in the same dir would otherwise be misattributed to this one) and
+// persist it as resume_session_id once found. Give up silently after a
+// timeout, and bail early if the session has already exited — this is
+// strictly best-effort, resume just isn't offered if it never lands.
+function discoverWorkspaceCacheSessionId(
+  db: Database.Database,
+  terminalId: number,
+  cachePath: string,
+  cwd: string,
+  previousValue: string | undefined,
+): void {
+  const deadline = Date.now() + 20_000;
+  const poll = () => {
+    if (!live.has(terminalId)) return; // session already exited
+    const current = readWorkspaceCacheEntry(cachePath, cwd);
+    if (current && current !== previousValue) {
+      db.prepare("UPDATE terminal_sessions SET resume_session_id = ? WHERE id = ?").run(current, terminalId);
+      return;
+    }
+    if (Date.now() < deadline) setTimeout(poll, 1000);
+  };
+  setTimeout(poll, 1000);
 }
 
 // Quoted-segment aware tokenizer for the free-text "extra args" field, so
@@ -123,10 +194,27 @@ export function spawnSession(
   // Set only by resumeSessionsOnBoot, continuing a prior agent conversation
   // by id instead of minting a fresh one.
   resumeAgentSessionId?: string,
+  // The id to feed the adapter's resumeFlag template. Usually identical to
+  // resumeAgentSessionId (Claude: Besiege mints one id and it plays both
+  // roles), but adapters that can't pre-assign their own conversation id
+  // (sessionIdFromWorkspaceCache set — agy) need a separately-discovered
+  // value here, since resumeAgentSessionId there is only Besiege's own
+  // correlation id, not a real conversation id. See
+  // resolveResumeConversationId, which callers use to compute this.
+  resumeConversationId?: string,
 ): TerminalSessionRow {
   cwd = expandHome(cwd);
 
   const adapter = agentAdapterName ? findAgentConfig(agentAdapterName) : undefined;
+  if (adapter) ensureMcpRegistered(adapter);
+
+  // Snapshotted before spawn so the post-launch poll below can tell a fresh
+  // entry apart from a stale one already sitting in the cache file for this
+  // cwd from an earlier, unrelated session.
+  const workspaceCacheEntryBefore =
+    !resumeAgentSessionId && adapter?.sessionIdFromWorkspaceCache
+      ? readWorkspaceCacheEntry(adapter.sessionIdFromWorkspaceCache, cwd)
+      : undefined;
 
   const command = adapter?.binary ?? "zsh";
   const mcpArgs = adapter?.mcpConfigFlag
@@ -139,7 +227,9 @@ export function spawnSession(
   const agentSessionId = resumeAgentSessionId ?? (adapter?.sessionIdFlag ? randomUUID() : null);
   const sessionArgs =
     resumeAgentSessionId && adapter?.resumeFlag
-      ? splitArgs(adapter.resumeFlag).map((token) => token.replace("{sessionId}", resumeAgentSessionId))
+      ? splitArgs(adapter.resumeFlag).map((token) =>
+          token.replace("{sessionId}", resumeConversationId ?? resumeAgentSessionId),
+        )
       : agentSessionId && adapter?.sessionIdFlag
         ? splitArgs(adapter.sessionIdFlag).map((token) => token.replace("{sessionId}", agentSessionId))
         : [];
@@ -196,6 +286,10 @@ export function spawnSession(
 
   const session: LiveSession = { id, pty: proc, buffer: "", subscribers: new Set() };
   live.set(id, session);
+
+  if (!resumeAgentSessionId && adapter?.sessionIdFromWorkspaceCache) {
+    discoverWorkspaceCacheSessionId(db, id, adapter.sessionIdFromWorkspaceCache, cwd, workspaceCacheEntryBefore);
+  }
 
   proc.onData((chunk) => {
     appendToBuffer(session, chunk);
@@ -276,6 +370,22 @@ export function killAllLiveSessions(db: Database.Database): void {
   }
 }
 
+// Which conversation id to feed the adapter's resumeFlag / to gate resume
+// availability on. Adapters that mint their own id and only surface it
+// post-launch (sessionIdFromWorkspaceCache set — agy) must use
+// resume_session_id specifically: agent_session_id there is Besiege's own
+// correlation id (BESIEGE_SESSION_ID), not a real conversation id, and
+// passing it to e.g. `--conversation` would resume nothing that exists.
+// Every other adapter falls back to agent_session_id, exactly as before
+// this column existed.
+export function resolveResumeConversationId(
+  adapter: AgentConfig | undefined,
+  row: Pick<TerminalSessionRow, "agent_session_id" | "resume_session_id">,
+): string | null {
+  if (adapter?.sessionIdFromWorkspaceCache) return row.resume_session_id;
+  return row.resume_session_id ?? row.agent_session_id;
+}
+
 // No PTY can survive a daemon restart (the IPty handle only ever lived in
 // this process's `live` map), so every row still marked 'active' from a
 // previous process is stale by definition. Unlike the old reap-only
@@ -296,7 +406,8 @@ export function resumeSessionsOnBoot(db: Database.Database): Map<number, number 
   for (const row of staleRows) {
     let resumedId: number | null = null;
     const adapter = row.agent_adapter_name ? findAgentConfig(row.agent_adapter_name) : undefined;
-    if (adapter?.resumeFlag && row.agent_session_id) {
+    const resumeConversationId = resolveResumeConversationId(adapter, row);
+    if (adapter?.resumeFlag && resumeConversationId) {
       try {
         const resumed = spawnSession(
           db,
@@ -306,7 +417,8 @@ export function resumeSessionsOnBoot(db: Database.Database): Map<number, number 
           row.agent_adapter_name ?? undefined,
           Boolean(row.yolo),
           row.extra_args ?? undefined,
-          row.agent_session_id,
+          row.agent_session_id ?? undefined,
+          resumeConversationId,
         );
         resumedId = resumed.id;
       } catch {

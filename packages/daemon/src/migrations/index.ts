@@ -473,6 +473,26 @@ export const migrations: Migration[] = [
       }
     },
   },
+  {
+    name: "0032_terminal_session_resume_session_id",
+    sql: `
+      -- agent_session_id doubles today as (a) the BESIEGE_SESSION_ID value
+      -- used for claims/notifications/hook-confirm correlation and (b) —
+      -- for adapters that mint the id up front and hand it to a
+      -- session-id-at-launch flag (Claude) — the CLI's own resumable id.
+      -- Some adapters (Antigravity/agy) can't pre-assign a conversation id
+      -- at all; theirs is only discoverable after the fact (see
+      -- sessionIdFromWorkspaceCache in terminals.ts), and is a genuinely
+      -- different value from the correlation id. Overwriting
+      -- agent_session_id with it would break notification/claim lookups
+      -- keyed on the original BESIEGE_SESSION_ID, so it gets its own
+      -- column instead. NULL for every adapter that doesn't need it
+      -- (i.e. everything except agy) — resume call sites fall back to
+      -- agent_session_id when this is unset, so existing adapters are
+      -- unaffected.
+      ALTER TABLE terminal_sessions ADD COLUMN resume_session_id TEXT;
+    `,
+  },
 ];
 
 // Pre-0031, a split was a binary { dir, ratio, a, b } node (nesting two

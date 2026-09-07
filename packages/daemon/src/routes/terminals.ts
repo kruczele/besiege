@@ -6,6 +6,7 @@ import {
   killSession,
   removeSession,
   resizeSession,
+  resolveResumeConversationId,
   spawnSession,
   writeToSession,
   type TerminalSessionRow,
@@ -124,7 +125,7 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
         reply.code(404);
         return { error: "session to resume from not found" };
       }
-      if (!prior.agent_adapter_name || !prior.agent_session_id) {
+      if (!prior.agent_adapter_name) {
         reply.code(400);
         return { error: "session has no resumable agent conversation" };
       }
@@ -132,6 +133,11 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
       if (!adapter?.resumeFlag) {
         reply.code(400);
         return { error: "adapter does not support resume" };
+      }
+      const resumeConversationId = resolveResumeConversationId(adapter, prior);
+      if (!resumeConversationId) {
+        reply.code(400);
+        return { error: "session has no resumable agent conversation" };
       }
       const resumed = spawnSession(
         db,
@@ -141,7 +147,8 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
         prior.agent_adapter_name,
         Boolean(prior.yolo),
         prior.extra_args ?? undefined,
-        prior.agent_session_id,
+        prior.agent_session_id ?? undefined,
+        resumeConversationId,
       );
       const withAgent = db
         .prepare(`${SELECT_SESSION} WHERE ts.id = ?`)
