@@ -5,7 +5,6 @@ import {
   Copy,
   ExternalLink,
   Minus,
-  Pin,
   PinOff,
   Plus,
   RefreshCw,
@@ -623,12 +622,12 @@ function CampaignsPanel({
 
       {showNewForm && <NewCampaignForm onCreated={handleCreated} />}
 
-      {repos.length > 0 && (
+      {repos.some((r) => r.pinned) && (
         <div className="pinned-repos">
-          {[...repos]
-            .sort((a, b) => Number(b.pinned) - Number(a.pinned))
+          {repos
+            .filter((r) => r.pinned)
             .map((r) => (
-              <div key={r.id} className={`pinned-repo-chip ${r.pinned ? "" : "pinned-repo-chip-unpinned"}`}>
+              <div key={r.id} className="pinned-repo-chip">
                 <a
                   className="pinned-repo-link"
                   href={`https://github.com/${r.githubFullName}`}
@@ -638,12 +637,8 @@ function CampaignsPanel({
                   <ExternalLink size={13} />
                   {r.githubFullName}
                 </a>
-                <button
-                  className="pinned-repo-unpin"
-                  title={r.pinned ? "Unpin" : "Pin for quick access"}
-                  onClick={() => toggleRepoPinned(r)}
-                >
-                  {r.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                <button className="pinned-repo-unpin" title="Unpin" onClick={() => toggleRepoPinned(r)}>
+                  <PinOff size={13} />
                 </button>
               </div>
             ))}

@@ -662,14 +662,6 @@ h1 {
   font-size: 0.78rem;
 }
 
-.pinned-repo-chip-unpinned {
-  opacity: 0.55;
-}
-
-.pinned-repo-chip-unpinned:hover {
-  opacity: 1;
-}
-
 .pinned-repo-link {
   display: flex;
   align-items: center;
