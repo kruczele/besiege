@@ -227,7 +227,8 @@ const TOOLS = [
       "actually been opened, e.g. right after a batch of `gh pr create` runs across a campaign's repos. Takes " +
       "a list so one call covers however many PRs you have, instead of one call per PR. This is what lets the " +
       "campaign board show real PR state (CI, review, lifecycle) instead of 'not started' — without it, the " +
-      "daemon has no way to know a PR exists.",
+      "daemon has no way to know a PR exists. This never pins the repo — pinning is a separate, human-requested " +
+      "action (see pin_repo); don't call pin_repo alongside this unless explicitly asked to.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -254,8 +255,10 @@ const TOOLS = [
     name: "pin_repo",
     description:
       "Pin a repo in the campaign for one-click access from the GUI (a quick-open bar linking straight to " +
-      "its GitHub page). Use this for repos that matter most to keep an eye on in a campaign spanning many " +
-      "repos — e.g. the one with the actual behavior change, versus repos only touched for a mechanical bump.",
+      "its GitHub page). Only call this when a human explicitly asks you to pin (or unpin) a specific repo — " +
+      "never as a side effect of register_pr or claim_pr, and never on your own judgment about which repos " +
+      "seem more important. A campaign can span hundreds of repos; pinning is a human curation choice for the " +
+      "one or two worth watching closely, not something to apply per-PR or per-repo automatically.",
     inputSchema: {
       type: "object" as const,
       properties: {
