@@ -83,6 +83,50 @@ event. Neither will ever block or fail a Claude Code session.
   daemon's `notifications` table so they show up in the GUI's Inbox
   tab instead of requiring you to notice a specific terminal.
 
+## Wiring Antigravity (agy) hooks
+
+agy has a structurally different hook system from Claude Code — no
+`SessionStart`/`Notification` events with an `additionalContext`-style
+output, but `hooks.json` lifecycle hooks (`PreToolUse`, `PostToolUse`,
+`PreInvocation`, `PostInvocation`, `Stop`) that inject content via
+`injectSteps`/`ephemeralMessage` instead. **This schema was
+reverse-engineered** — cross-checked against literal strings in the
+installed `agy` binary rather than an official reference, since none was
+found — so treat it as a first pass to be corrected after real use, not a
+confirmed contract.
+
+Add to `~/.gemini/config/hooks.json` (global; `<workspace>/.agents/hooks.json`
+for a single project) — merge into it rather than overwriting, if it
+already has other named hooks:
+
+```json
+{
+  "besiege": {
+    "PreInvocation": [{ "type": "command", "command": "node /path/to/besiege/packages/daemon/dist/hooks/agy-pre-invocation.js" }],
+    "Stop": [{ "type": "command", "command": "node /path/to/besiege/packages/daemon/dist/hooks/agy-stop.js" }]
+  }
+}
+```
+
+- `agy-pre-invocation.js` — agy's closest analog to `session-start.js`.
+  Only acts on a conversation's first invocation (guessed from
+  `invocationNum`, since agy has no dedicated session-start event of its
+  own), resolves `workspacePaths[0]` against `config_rules`, and emits
+  `injectSteps: [{ ephemeralMessage }]` instead of `additionalContext`.
+- `agy-stop.js` — agy's closest analog to `notification.js`. agy's `Stop`
+  event has no confirmed "genuinely idle vs. mid-turn" discriminator (a
+  `fullyIdle`-style field some third-party docs claimed does not appear
+  anywhere in the binary), so this currently fires on every `Stop` — likely
+  noisier than Claude's `Notification` until that's confirmed one way or
+  the other.
+
+Besiege's own MCP server and the `--conversation`-based resume are handled
+separately — see `agents.default.yaml`'s `mcpRegisterCommand` (a one-time
+`agy mcp add` rather than a per-launch flag) and
+`sessionIdFromWorkspaceCache` (agy has no way to pre-assign a conversation
+id, so Besiege discovers it after launch from agy's own
+`~/.gemini/antigravity-cli/cache/last_conversations.json`).
+
 ## API
 
 | Route | What |

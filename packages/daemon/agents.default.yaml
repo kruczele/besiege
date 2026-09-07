@@ -4,9 +4,16 @@
 # overrides the default entirely, and any other name is just added.
 #
 # Fields: name (required), binary (required), yoloFlag, mcpConfigFlag,
-# sessionIdFlag, resumeFlag (all optional). mcpConfigFlag/sessionIdFlag/
-# resumeFlag are argv templates — {path} and {sessionId} get substituted at
-# launch time.
+# sessionIdFlag, resumeFlag, mcpRegisterCommand, sessionIdFromWorkspaceCache
+# (all optional). mcpConfigFlag/sessionIdFlag/resumeFlag are argv templates —
+# {path} and {sessionId} get substituted at launch time.
+#
+# mcpRegisterCommand/sessionIdFromWorkspaceCache exist for CLIs that don't
+# fit the argv-flag model at all: agy has no --mcp-config-style flag (MCP
+# servers are a persistent named registry instead, registered once via
+# `agy mcp add`) and no way to pre-assign a conversation id (its id is only
+# discoverable after launch, from a workspace-path-keyed cache file it
+# writes). See agent-config.ts and terminals.ts for how these are consumed.
 - name: Claude
   binary: claude
   yoloFlag: --dangerously-skip-permissions
@@ -19,3 +26,6 @@
 - name: Antigravity (agy)
   binary: agy
   yoloFlag: --dangerously-skip-permissions
+  resumeFlag: "--conversation {sessionId}"
+  mcpRegisterCommand: "mcp add besiege {execPath} {mcpEntryPoint}"
+  sessionIdFromWorkspaceCache: "~/.gemini/antigravity-cli/cache/last_conversations.json"
