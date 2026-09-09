@@ -493,6 +493,19 @@ export const migrations: Migration[] = [
       ALTER TABLE terminal_sessions ADD COLUMN resume_session_id TEXT;
     `,
   },
+  {
+    name: "0033_campaign_steps_name_unique",
+    sql: `
+      -- campaign_steps was only unique on (campaign_id, step_order). Concurrent
+      -- register_pr entries sharing a step name (mcp.ts resolveStepId) race a
+      -- check-then-insert against that same name — nothing stopped two of them
+      -- from both passing the check and creating two rows for it. Enforcing
+      -- uniqueness on the name itself (case-insensitive, matching
+      -- resolveStepId's own comparison) makes the race resolve at the DB layer
+      -- instead of silently forking the step.
+      CREATE UNIQUE INDEX idx_campaign_steps_campaign_name ON campaign_steps(campaign_id, name COLLATE NOCASE);
+    `,
+  },
 ];
 
 // Pre-0031, a split was a binary { dir, ratio, a, b } node (nesting two

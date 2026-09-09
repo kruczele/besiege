@@ -231,8 +231,18 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
         return toStep(row);
       } catch (err: unknown) {
         if (err instanceof Error && err.message.includes("UNIQUE")) {
+          // Concurrent register_pr entries race resolveStepId's check-then-insert
+          // for the same step name (mcp.ts) — the loser here isn't a real
+          // conflict, it's the step the winner just created. Hand back that row
+          // instead of a 409 the caller has no way to resolve to a real id.
+          const existing = db
+            .prepare("SELECT * FROM campaign_steps WHERE campaign_id = ? AND name = ? COLLATE NOCASE")
+            .get(req.params.campaignId, name.trim()) as StepRow | undefined;
+          if (existing) return toStep(existing);
+          // Different step name landed on the same computed step_order — a
+          // genuine, retry-safe collision (a fresh GET /steps picks a new order).
           reply.code(409);
-          return { error: "step_order already exists in this campaign" };
+          return { error: "step_order collision, retry" };
         }
         throw err;
       }
@@ -301,8 +311,15 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
         return toRepo(row);
       } catch (err: unknown) {
         if (err instanceof Error && err.message.includes("UNIQUE")) {
-          reply.code(409);
-          return { error: "repo already registered in this campaign" };
+          // Same race as campaign_steps above — resolveRepoId's check-then-insert
+          // (mcp.ts) can lose to a concurrent register_pr entry for the same
+          // repo. There's no genuine-collision case here (the constraint is
+          // exactly "same campaign, same name"), so always hand back the
+          // winner's row instead of erroring.
+          const existing = db
+            .prepare("SELECT * FROM campaign_repos WHERE campaign_id = ? AND github_full_name = ?")
+            .get(req.params.campaignId, github_full_name.trim()) as RepoRow;
+          return toRepo(existing);
         }
         throw err;
       }
