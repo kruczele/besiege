@@ -76,56 +76,75 @@ export function registerPrRoutes(
 ) {
   // Grid view: all PRs for a campaign, joined with repo info for display.
   // ?filter=needs-me: unaddressed feedback, failing CI, or approved+mergeable.
-  // ?repo=org/repo: narrow to a single repo (used by MCP pr_state tool).
-  app.get<{ Params: { campaignId: string }; Querystring: { filter?: string; repo?: string } }>(
-    "/campaigns/:campaignId/prs",
-    async (req, reply) => {
-      const campaign = db.prepare("SELECT id FROM campaigns WHERE id = ?").get(req.params.campaignId);
-      if (!campaign) {
-        reply.code(404);
-        return { error: "campaign not found" };
-      }
+  // ?repo=org/repo: narrow to a single repo. All filters are optional and
+  // AND together — omitting them all (as the MCP pr_state tool does when
+  // `repo` isn't passed) returns every PR registered in the campaign.
+  app.get<{
+    Params: { campaignId: string };
+    Querystring: { filter?: string; repo?: string; reviewState?: string; ciStatus?: string; lifecycle?: string };
+  }>("/campaigns/:campaignId/prs", async (req, reply) => {
+    const campaign = db.prepare("SELECT id FROM campaigns WHERE id = ?").get(req.params.campaignId);
+    if (!campaign) {
+      reply.code(404);
+      return { error: "campaign not found" };
+    }
 
-      const needsMe = req.query.filter === "needs-me";
-      const filterClause = needsMe
-        ? `AND (p.ci_status = 'failing' OR p.review_state = 'changes-requested')`
-        : "";
-      const repoClause = req.query.repo ? `AND cr.github_full_name = ?` : "";
-      const params: unknown[] = [req.params.campaignId];
-      if (req.query.repo) params.push(req.query.repo);
+    // repo is optional — omitting it returns every PR registered anywhere in
+    // the campaign, which is what the MCP pr_state tool uses for a
+    // campaign-wide query instead of looping per repo.
+    const clauses: string[] = [];
+    const params: unknown[] = [req.params.campaignId];
+    if (req.query.filter === "needs-me") {
+      clauses.push(`(p.ci_status = 'failing' OR p.review_state = 'changes-requested')`);
+    }
+    if (req.query.repo) {
+      clauses.push(`cr.github_full_name = ?`);
+      params.push(req.query.repo);
+    }
+    if (req.query.reviewState) {
+      clauses.push(`p.review_state = ?`);
+      params.push(req.query.reviewState);
+    }
+    if (req.query.ciStatus) {
+      clauses.push(`p.ci_status = ?`);
+      params.push(req.query.ciStatus);
+    }
+    if (req.query.lifecycle) {
+      clauses.push(`p.lifecycle = ?`);
+      params.push(req.query.lifecycle);
+    }
+    const filterClause = clauses.map((c) => `AND ${c}`).join(" ");
 
-      const rows = db
-        .prepare(
-          `SELECT p.*,
-                  cr.github_full_name AS repo_name,
-                  cs.name AS step_name,
-                  cs.step_order,
-                  (SELECT COUNT(*) FROM pr_pending_tasks pt
-                   WHERE pt.pr_id = p.id AND pt.closed_at IS NULL) AS pending_tasks_count
-           FROM prs p
-           JOIN campaign_repos cr ON cr.id = p.repo_id
-           JOIN campaign_steps cs ON cs.id = p.step_id
-           WHERE cs.campaign_id = ?
-           ${filterClause}
-           ${repoClause}
-           ORDER BY cs.step_order ASC, cr.github_full_name ASC`,
-        )
-        .all(...params) as (PrRow & {
-          repo_name: string;
-          step_name: string;
-          step_order: number;
-          pending_tasks_count: number;
-        })[];
+    const rows = db
+      .prepare(
+        `SELECT p.*,
+                cr.github_full_name AS repo_name,
+                cs.name AS step_name,
+                cs.step_order,
+                (SELECT COUNT(*) FROM pr_pending_tasks pt
+                 WHERE pt.pr_id = p.id AND pt.closed_at IS NULL) AS pending_tasks_count
+         FROM prs p
+         JOIN campaign_repos cr ON cr.id = p.repo_id
+         JOIN campaign_steps cs ON cs.id = p.step_id
+         WHERE cs.campaign_id = ?
+         ${filterClause}
+         ORDER BY cs.step_order ASC, cr.github_full_name ASC`,
+      )
+      .all(...params) as (PrRow & {
+        repo_name: string;
+        step_name: string;
+        step_order: number;
+        pending_tasks_count: number;
+      })[];
 
-      return rows.map((r) => ({
-        ...toPr(r),
-        repoName: r.repo_name,
-        stepName: r.step_name,
-        stepOrder: r.step_order,
-        pendingTasksCount: r.pending_tasks_count,
-      }));
-    },
-  );
+    return rows.map((r) => ({
+      ...toPr(r),
+      repoName: r.repo_name,
+      stepName: r.step_name,
+      stepOrder: r.step_order,
+      pendingTasksCount: r.pending_tasks_count,
+    }));
+  });
 
   // Register or upsert a PR for a (step, repo) slot.
   app.post<{

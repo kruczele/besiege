@@ -1,7 +1,12 @@
 import { request } from "node:http";
 import { socketPath } from "../paths.js";
 
-function call<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+function call<T>(
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+  timeoutMs = 2000,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = request(
@@ -9,7 +14,7 @@ function call<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body
         socketPath,
         path,
         method,
-        timeout: 2000,
+        timeout: timeoutMs,
         headers: payload
           ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) }
           : undefined,
@@ -36,10 +41,10 @@ function call<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body
   });
 }
 
-export const getJson = <T>(path: string) => call<T>("GET", path);
-export const postJson = <T>(path: string, body: unknown) => call<T>("POST", path, body);
-export const patchJson = <T>(path: string, body: unknown) => call<T>("PATCH", path, body);
-export const deleteJson = <T>(path: string) => call<T>("DELETE", path);
+export const getJson = <T>(path: string, timeoutMs?: number) => call<T>("GET", path, undefined, timeoutMs);
+export const postJson = <T>(path: string, body: unknown, timeoutMs?: number) => call<T>("POST", path, body, timeoutMs);
+export const patchJson = <T>(path: string, body: unknown, timeoutMs?: number) => call<T>("PATCH", path, body, timeoutMs);
+export const deleteJson = <T>(path: string, timeoutMs?: number) => call<T>("DELETE", path, undefined, timeoutMs);
 
 export function readStdin(): Promise<string> {
   return new Promise((resolve) => {

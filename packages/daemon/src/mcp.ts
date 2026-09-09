@@ -93,20 +93,56 @@ async function resolvePrId(
   step: string,
   githubPrNumber?: number,
   githubNodeId?: string,
+  // POST /prs backfills github_node_id from a live GitHub call when only a PR
+  // number is given (see prs.ts) — register_pr hits that path and needs more
+  // than the 2s default the daemon socket otherwise uses for everything else.
+  timeoutMs?: number,
 ): Promise<number> {
   const [repoId, stepId] = await Promise.all([resolveRepoId(campaign, repo), resolveStepId(campaign, step)]);
   // Upsert — idempotent per the UNIQUE(step_id, repo_id) constraint, same as
   // `besiege dispatch` (cli.ts). github_pr_number/github_node_id are
   // COALESCEd server-side, so omitting them here never clobbers a value
   // register_pr already set.
-  const pr = await postJson<Pr>("/prs", {
-    step_id: stepId,
-    repo_id: repoId,
-    github_pr_number: githubPrNumber,
-    github_node_id: githubNodeId,
-  });
+  const pr = await postJson<Pr>(
+    "/prs",
+    {
+      step_id: stepId,
+      repo_id: repoId,
+      github_pr_number: githubPrNumber,
+      github_node_id: githubNodeId,
+    },
+    timeoutMs,
+  );
   return pr.id;
 }
+
+// Bounded-concurrency map — register_pr entries used to all fire at once via
+// Promise.all, which under a large batch (e.g. 40+ repos sharing one step)
+// piled up concurrent daemon requests and GitHub API calls faster than either
+// could keep up, cascading into client-side timeouts. Chunking here means
+// callers no longer need to split large batches themselves.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (let i = next++; i < items.length; i = next++) {
+      try {
+        results[i] = { status: "fulfilled", value: await fn(items[i], i) };
+      } catch (reason) {
+        results[i] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+const REGISTER_PR_CONCURRENCY = 8;
+const REGISTER_PR_TIMEOUT_MS = 10_000;
 
 // PRs this MCP server process has claimed — heartbeated below for as long as
 // the process (i.e. the agent's session) is alive, and best-effort released
@@ -143,15 +179,21 @@ const TOOLS = [
   {
     name: "pr_state",
     description:
-      "Get the current state of all PRs for a repo in a campaign (all steps). " +
+      "Get the current state of PRs in a campaign. Pass repo to scope to one repo (all its steps); omit it " +
+      "to get every PR registered anywhere in the campaign in a single call — use this for campaign-wide " +
+      "triage (e.g. \"which of my PRs have changes requested\") instead of looping pr_state per repo. " +
+      "Optionally narrow further with reviewState/ciStatus/lifecycle. " +
       "Prefer this over gh/GitHub API for status reads — it uses the cached daemon state and conserves rate limits.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        repo: { type: "string", description: 'GitHub full name, e.g. "org/repo"' },
+        repo: { type: "string", description: 'GitHub full name, e.g. "org/repo". Omit for every repo in the campaign.' },
+        reviewState: { type: "string", description: 'Optional exact-match filter, e.g. "changes-requested", "approved".' },
+        ciStatus: { type: "string", description: 'Optional exact-match filter, e.g. "failing", "passing", "pending".' },
+        lifecycle: { type: "string", description: 'Optional exact-match filter, e.g. "open", "merged", "not-started".' },
         campaign: CAMPAIGN_PROPERTY,
       },
-      required: ["repo"],
+      required: [],
     },
   },
   {
@@ -225,10 +267,12 @@ const TOOLS = [
     description:
       "Record GitHub PR numbers (and optionally node ids) for one or many (repo, step) pairs once they've " +
       "actually been opened, e.g. right after a batch of `gh pr create` runs across a campaign's repos. Takes " +
-      "a list so one call covers however many PRs you have, instead of one call per PR. This is what lets the " +
-      "campaign board show real PR state (CI, review, lifecycle) instead of 'not started' — without it, the " +
-      "daemon has no way to know a PR exists. This never pins the repo — pinning is a separate, human-requested " +
-      "action (see pin_repo); don't call pin_repo alongside this unless explicitly asked to.",
+      "a list so one call covers however many PRs you have, instead of one call per PR — entries are " +
+      `processed with bounded concurrency (${REGISTER_PR_CONCURRENCY} at a time) internally, so there's no ` +
+      "need to pre-split a large batch yourself. This is what lets the campaign board show real PR state " +
+      "(CI, review, lifecycle) instead of 'not started' — without it, the daemon has no way to know a PR " +
+      "exists. This never pins the repo — pinning is a separate, human-requested action (see pin_repo); " +
+      "don't call pin_repo alongside this unless explicitly asked to.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -328,11 +372,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   try {
     switch (name) {
       case "pr_state": {
-        const { repo } = a;
+        const { repo, reviewState, ciStatus, lifecycle } = a;
         const campaign = resolveCampaign(a);
-        if (!repo) throw new Error("repo is required");
+        const qs = new URLSearchParams();
+        if (repo) qs.set("repo", repo);
+        if (reviewState) qs.set("reviewState", reviewState);
+        if (ciStatus) qs.set("ciStatus", ciStatus);
+        if (lifecycle) qs.set("lifecycle", lifecycle);
+        const query = qs.toString();
         const data = await getJson(
-          `/campaigns/${encodeURIComponent(campaign)}/prs?repo=${encodeURIComponent(repo)}`,
+          `/campaigns/${encodeURIComponent(campaign)}/prs${query ? `?${query}` : ""}`,
         );
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
       }
@@ -387,16 +436,21 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (!Array.isArray(entries) || entries.length === 0) {
           throw new Error("entries (a non-empty array) is required");
         }
-        const outcomes = await Promise.allSettled(
-          entries.map(async (raw) => {
-            const entry = raw as { repo?: string; step?: string; githubPrNumber?: number; githubNodeId?: string };
-            if (!entry.repo || !entry.step || !entry.githubPrNumber) {
-              throw new Error(`invalid entry: ${JSON.stringify(raw)}`);
-            }
-            const prId = await resolvePrId(campaign, entry.repo, entry.step, entry.githubPrNumber, entry.githubNodeId);
-            return `${entry.repo} (${entry.step}) -> PR #${entry.githubPrNumber}, pr id ${prId}`;
-          }),
-        );
+        const outcomes = await mapWithConcurrency(entries, REGISTER_PR_CONCURRENCY, async (raw) => {
+          const entry = raw as { repo?: string; step?: string; githubPrNumber?: number; githubNodeId?: string };
+          if (!entry.repo || !entry.step || !entry.githubPrNumber) {
+            throw new Error(`invalid entry: ${JSON.stringify(raw)}`);
+          }
+          const prId = await resolvePrId(
+            campaign,
+            entry.repo,
+            entry.step,
+            entry.githubPrNumber,
+            entry.githubNodeId,
+            REGISTER_PR_TIMEOUT_MS,
+          );
+          return `${entry.repo} (${entry.step}) -> PR #${entry.githubPrNumber}, pr id ${prId}`;
+        });
         const lines = outcomes.map((o, i) =>
           o.status === "fulfilled"
             ? `ok: ${o.value}`
