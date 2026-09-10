@@ -137,6 +137,14 @@ export const webApi: Api = {
     }
   },
 
+  // Electron's shell.openExternal has no browser equivalent — window.open
+  // is the closest thing, though unlike the Electron IPC path it's still
+  // subject to the browser's own popup blocker for calls beyond the first
+  // per click.
+  openExternal: async (url) => {
+    window.open(url, "_blank", "noopener,noreferrer");
+  },
+
   // No custom window chrome or Electron zoom API in a browser tab — App's
   // `chrome={false}` keeps these from ever being called.
   minimizeWindow: async () => {},
