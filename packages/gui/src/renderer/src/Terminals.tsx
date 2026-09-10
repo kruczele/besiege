@@ -228,41 +228,37 @@ function PaneView({
 
   return (
     <div className={`terminal-grid-pane ${isActive ? "active" : ""}`} onMouseDownCapture={() => onActivate(node.id)}>
+      <div className="terminal-grid-pane-header">
+        <span className={`terminal-grid-pane-title ${isExited ? "exited" : ""}`}>
+          {session ? titles[session.id] ?? session.label ?? `Terminal #${session.id}` : "Empty"}
+        </span>
+        <div className="terminal-grid-pane-actions">
+          <button title="Split right" onClick={() => onSplit(node.id, "row")}>
+            <PanelRightOpen size={13} />
+          </button>
+          <button title="Split down" onClick={() => onSplit(node.id, "col")}>
+            <PanelBottomOpen size={13} />
+          </button>
+          <button title="Close pane" onClick={() => onClosePane(node.id, session?.id)}>
+            <X size={13} />
+          </button>
+        </div>
+      </div>
       {node.sessionId === null ? (
         <PaneLauncher adapters={adapters} onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)} />
       ) : !session ? (
         <p className="status status-pending pane-loading">Loading…</p>
+      ) : isExited ? (
+        // Falls back to a fresh launcher instead of sitting on a dead,
+        // uninteractive terminal — with an option to pick up the same
+        // agent conversation again when it's resumable.
+        <PaneLauncher
+          adapters={adapters}
+          onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)}
+          resume={canResume ? { agentName: adapter!.name, onResume: () => onResume(node.id, session.id) } : undefined}
+        />
       ) : (
-        <>
-          <div className="terminal-grid-pane-header">
-            <span className={`terminal-grid-pane-title ${isExited ? "exited" : ""}`}>
-              {titles[session.id] ?? session.label ?? `Terminal #${session.id}`}
-            </span>
-            <div className="terminal-grid-pane-actions">
-              <button title="Split right" onClick={() => onSplit(node.id, "row")}>
-                <PanelRightOpen size={13} />
-              </button>
-              <button title="Split down" onClick={() => onSplit(node.id, "col")}>
-                <PanelBottomOpen size={13} />
-              </button>
-              <button title="Close pane" onClick={() => onClosePane(node.id, session.id)}>
-                <X size={13} />
-              </button>
-            </div>
-          </div>
-          {isExited ? (
-            // Falls back to a fresh launcher instead of sitting on a dead,
-            // uninteractive terminal — with an option to pick up the same
-            // agent conversation again when it's resumable.
-            <PaneLauncher
-              adapters={adapters}
-              onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)}
-              resume={canResume ? { agentName: adapter!.name, onResume: () => onResume(node.id, session.id) } : undefined}
-            />
-          ) : (
-            <TerminalView id={session.id} onTitle={(title) => onTitle(session.id, title)} />
-          )}
-        </>
+        <TerminalView id={session.id} onTitle={(title) => onTitle(session.id, title)} />
       )}
     </div>
   );
@@ -329,6 +325,7 @@ export function TerminalsMain({
   onFocusHandled,
   titles,
   onTitleChange,
+  onActiveSessionChange,
 }: {
   campaignId: number | null;
   // Set by App (e.g. "Jump to agent" from the Inbox) to ask this campaign's
@@ -341,6 +338,11 @@ export function TerminalsMain({
   // (nicer than its adapter name/label) without duplicating this state.
   titles: Record<number, string>;
   onTitleChange: (id: number, title: string) => void;
+  // Lifted to App so the Inbox can auto-acknowledge a session's notification
+  // once the operator has actually focused that pane for a while — the pane
+  // tree only knows pane ids, not terminal session ids, so this is resolved
+  // here and reported up rather than duplicated in App.
+  onActiveSessionChange?: (sessionId: number | null) => void;
 }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
@@ -443,6 +445,12 @@ export function TerminalsMain({
   }, [campaignId]);
 
   const activeLayout = layouts.find((l) => l.id === activeLayoutId) ?? null;
+
+  useEffect(() => {
+    const activeLeaf = activeLayout ? leavesInOrder(activeLayout.tree).find((l) => l.id === activePaneId) : undefined;
+    onActiveSessionChange?.(activeLeaf?.sessionId ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLayout, activePaneId]);
 
   const persistTree = (layoutId: number, tree: PaneNode) => {
     setLayouts((prev) => prev.map((l) => (l.id === layoutId ? { ...l, tree } : l)));

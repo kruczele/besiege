@@ -546,11 +546,18 @@ h1 {
   opacity: 0.7;
 }
 
+.pr-board-cell-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .pr-board-cell-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   background: none;
   border: none;
   padding: 0;
@@ -558,6 +565,22 @@ h1 {
   font-weight: 600;
   color: var(--text);
   cursor: pointer;
+}
+
+.pr-board-cell-open-all {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.pr-board-cell-open-all:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 .pr-board-count {
@@ -619,11 +642,29 @@ h1 {
 .pr-board-pr-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
 }
 
+.pr-board-pr-row-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 12px;
+}
+
+@keyframes pr-board-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pr-board-pr-row-spin {
+  animation: pr-board-spin 1s linear infinite;
+  color: var(--text-secondary);
+}
+
 .pr-board-pr-row-main {
+  flex: 1;
   min-width: 0;
 }
 

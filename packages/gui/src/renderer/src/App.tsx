@@ -63,6 +63,11 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
   // title too, not just whichever pane happens to be mounted.
   const [titles, setTitles] = useState<Record<number, string>>({});
   const onTitleChange = (id: number, title: string) => setTitles((prev) => ({ ...prev, [id]: title }));
+  // Which terminal session's pane is currently focused — lifted from
+  // TerminalsMain so the Inbox can auto-acknowledge a notification once the
+  // operator has actually spent a moment looking at the session that raised
+  // it, rather than requiring a manual "Acknowledge" click.
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
 
   // No application menu (frame: false, no visible menu bar) supplies the
   // conventional Ctrl/Cmd +/- zoom accelerators, so handle them here. Not
@@ -115,7 +120,7 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
             )}
             {tab === "rules" && <RulesPanel />}
           </div>
-          <InboxPanel onJump={jumpToSession} titles={titles} />
+          <InboxPanel onJump={jumpToSession} titles={titles} activeSessionId={activeSessionId} />
           <div className="sidebar-footer">
             <StatusPanel />
           </div>
@@ -127,6 +132,7 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
             onFocusHandled={() => setFocusRequest(null)}
             titles={titles}
             onTitleChange={onTitleChange}
+            onActiveSessionChange={setActiveSessionId}
           />
         </main>
       </div>
@@ -250,7 +256,15 @@ function groupByBranch(prs: PrGridRow[]): { branch: string; prs: PrGridRow[] }[]
 // + CI, never review state). Every cell starts expanded except the fully
 // "safe" one (green + approved): that's the "good to go" pile the operator
 // explicitly doesn't need to look at, so it collapses to a count.
-function PrBoard({ prs, onDeleted }: { prs: PrGridRow[]; onDeleted: (id: number) => void }) {
+function PrBoard({
+  prs,
+  onDeleted,
+  syncStartedAt,
+}: {
+  prs: PrGridRow[];
+  onDeleted: (id: number) => void;
+  syncStartedAt: number | null;
+}) {
   const [collapsedCells, setCollapsedCells] = useState<Set<string>>(new Set(["passing|approved"]));
   const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set());
 
@@ -299,17 +313,34 @@ function PrBoard({ prs, onDeleted }: { prs: PrGridRow[]; onDeleted: (id: number)
                 const cellKey = `${ci.key}|${rv.key}`;
                 const isSafe = cellKey === "passing|approved";
                 const expanded = !collapsedCells.has(cellKey);
+                const openablePrs = cellPrs.filter((p) => p.githubPrNumber != null);
                 return (
                   <div
                     key={rv.key}
                     className={`pr-board-cell ${isSafe ? "pr-board-cell-safe" : "pr-board-cell-attention"}`}
                   >
-                    <button className="pr-board-cell-header" onClick={() => toggleCell(cellKey)}>
-                      <span>
-                        {expanded ? "▾" : "▸"} {rv.label}
-                      </span>
-                      <span className="pr-board-count">{cellPrs.length}</span>
-                    </button>
+                    <div className="pr-board-cell-header-row">
+                      <button className="pr-board-cell-header" onClick={() => toggleCell(cellKey)}>
+                        <span>
+                          {expanded ? "▾" : "▸"} {rv.label}
+                        </span>
+                        <span className="pr-board-count">{cellPrs.length}</span>
+                      </button>
+                      {openablePrs.length > 0 && (
+                        <button
+                          className="pr-board-cell-open-all"
+                          title={`Open all ${openablePrs.length} in browser`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            for (const p of openablePrs) {
+                              window.open(`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`, "_blank");
+                            }
+                          }}
+                        >
+                          Open all
+                        </button>
+                      )}
+                    </div>
                     {expanded && (
                       <ul className="pr-board-branch-list">
                         {groupByBranch(cellPrs).map((g) => {
@@ -325,8 +356,18 @@ function PrBoard({ prs, onDeleted }: { prs: PrGridRow[]; onDeleted: (id: number)
                               </button>
                               {branchExpanded && (
                                 <ul className="pr-board-repo-list">
-                                  {g.prs.map((p) => (
+                                  {g.prs.map((p) => {
+                                    const isStale =
+                                      syncStartedAt !== null &&
+                                      (p.syncedAt === null ||
+                                        new Date(p.syncedAt).getTime() < syncStartedAt);
+                                    return (
                                     <li key={p.id} className="pr-board-pr-row">
+                                      <span className="pr-board-pr-row-status">
+                                        {isStale && (
+                                          <RefreshCw size={12} className="pr-board-pr-row-spin" />
+                                        )}
+                                      </span>
                                       <span className="pr-board-pr-row-main">
                                         {p.githubPrNumber != null ? (
                                           <a
@@ -357,7 +398,8 @@ function PrBoard({ prs, onDeleted }: { prs: PrGridRow[]; onDeleted: (id: number)
                                         <X size={12} />
                                       </button>
                                     </li>
-                                  ))}
+                                    );
+                                  })}
                                 </ul>
                               )}
                             </li>
@@ -460,6 +502,7 @@ function CampaignsPanel({
   const [prs, setPrs] = useState<PrGridRow[]>([]);
   const [repos, setRepos] = useState<CampaignRepo[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -512,9 +555,18 @@ function CampaignsPanel({
   const handleSync = async () => {
     if (selectedId === null) return;
     setSyncing(true);
+    setSyncStartedAt(Date.now());
     await window.api.syncCampaign(selectedId);
     setTimeout(() => setSyncing(false), 1500);
   };
+
+  useEffect(() => {
+    if (syncStartedAt === null) return;
+    const allCaughtUp = prs.every(
+      (p) => p.syncedAt !== null && new Date(p.syncedAt).getTime() >= syncStartedAt,
+    );
+    if (allCaughtUp) setSyncStartedAt(null);
+  }, [prs, syncStartedAt]);
 
   const toggleRepoPinned = async (repo: CampaignRepo) => {
     if (selectedId === null) return;
@@ -653,7 +705,11 @@ function CampaignsPanel({
       {prs.length === 0 ? (
         <p className="status status-pending">No PRs registered yet.</p>
       ) : (
-        <PrBoard prs={prs} onDeleted={(id) => setPrs((prev) => prev.filter((p) => p.id !== id))} />
+        <PrBoard
+          prs={prs}
+          onDeleted={(id) => setPrs((prev) => prev.filter((p) => p.id !== id))}
+          syncStartedAt={syncStartedAt}
+        />
       )}
 
       {selectedId !== null && <TasksPanel campaignId={selectedId} steps={steps} />}
@@ -1142,14 +1198,24 @@ function RulesPanel() {
 
 // ── Inbox ─────────────────────────────────────────────────────────────────────
 
+// Focusing the session that raised a notification for this long auto-acks
+// it — long enough that merely tabbing/cycling past a pane doesn't count,
+// short enough that it doesn't feel like it's ignoring you.
+const AUTO_ACK_DWELL_MS = 2000;
+
 // Always visible below whichever sidebar tab is active — not a tab itself,
 // so it can't be navigated away from and forgotten about.
 function InboxPanel({
   onJump,
   titles,
+  activeSessionId,
 }: {
   onJump: (campaignId: number, terminalId: number) => void;
   titles: Record<number, string>;
+  // The terminal session id of whichever pane is currently focused, if any
+  // — used to auto-ack a notification once its session has had the
+  // operator's attention for AUTO_ACK_DWELL_MS.
+  activeSessionId: number | null;
 }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
@@ -1174,6 +1240,21 @@ function InboxPanel({
     const res = await window.api.listNotifications(true);
     if (res.ok) setNotifications(res.result);
   };
+
+  // Only the notification's *id* drives the timer — not the notifications
+  // array itself, which gets a new identity every POLL_FAST tick and would
+  // otherwise restart the dwell before it ever completes.
+  const autoAckId =
+    activeSessionId === null
+      ? null
+      : (notifications.find((n) => !n.acknowledgedAt && sessions[n.sessionId]?.id === activeSessionId)?.id ?? null);
+
+  useEffect(() => {
+    if (autoAckId === null) return;
+    const timer = setTimeout(() => void ack(autoAckId), AUTO_ACK_DWELL_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAckId]);
 
   return (
     <div className="inbox-section">
