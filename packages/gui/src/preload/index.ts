@@ -128,6 +128,8 @@ const api = {
   writeTerminal: (id: number, data: string): Promise<void> => ipcRenderer.invoke("terminal:write", id, data),
   resizeTerminal: (id: number, cols: number, rows: number): Promise<void> =>
     ipcRenderer.invoke("terminal:resize", id, cols, rows),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke("shell:open-external", url),
+
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke("window:minimize"),
   toggleMaximizeWindow: (): Promise<void> => ipcRenderer.invoke("window:toggle-maximize"),
   closeWindow: (): Promise<void> => ipcRenderer.invoke("window:close"),

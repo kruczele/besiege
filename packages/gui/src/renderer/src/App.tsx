@@ -332,7 +332,7 @@ function PrBoard({
                           onClick={(e) => {
                             e.stopPropagation();
                             for (const p of openablePrs) {
-                              window.open(`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`, "_blank");
+                              void window.api.openExternal(`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`);
                             }
                           }}
                         >
