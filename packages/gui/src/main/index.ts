@@ -224,6 +224,10 @@ ipcMain.handle("terminal:resize", (_event, id: number, cols: number, rows: numbe
   terminalBridge.resize(id, cols, rows);
 });
 
+ipcMain.handle("shell:open-external", (_event, url: string) => {
+  void shell.openExternal(url);
+});
+
 ipcMain.handle("window:minimize", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
 });
