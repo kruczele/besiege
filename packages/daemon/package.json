@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./layout-tree.js": {
+      "types": "./dist/layout-tree.d.ts",
+      "default": "./dist/layout-tree.js"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:mcp": "tsx watch src/mcp.ts",
