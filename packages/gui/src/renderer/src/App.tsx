@@ -358,8 +358,8 @@ function PrBoard({
                                   {g.prs.map((p) => {
                                     const isStale =
                                       syncStartedAt !== null &&
-                                      (p.syncedAt === null ||
-                                        new Date(p.syncedAt).getTime() < syncStartedAt);
+                                      p.syncedAt !== null &&
+                                      new Date(p.syncedAt).getTime() < syncStartedAt;
                                     return (
                                     <li key={p.id} className="pr-board-pr-row">
                                       <span className="pr-board-pr-row-status">
@@ -554,15 +554,22 @@ function CampaignsPanel({
   const handleSync = async () => {
     if (selectedId === null) return;
     setSyncing(true);
-    setSyncStartedAt(Date.now());
+    const startTime = Date.now();
+    setSyncStartedAt(startTime);
     await window.api.syncCampaign(selectedId);
     setTimeout(() => setSyncing(false), 1500);
+    // Safety net: if some PRs never update (silent network error, etc.),
+    // don't leave their spinners running forever.
+    setTimeout(() => setSyncStartedAt((prev) => (prev === startTime ? null : prev)), 60_000);
   };
 
   useEffect(() => {
     if (syncStartedAt === null) return;
+    // Only wait for PRs that had a syncedAt before — those without one have
+    // never been synced and syncCampaign may legitimately skip them (no
+    // github_node_id yet), so they must not block the spinner from clearing.
     const allCaughtUp = prs.every(
-      (p) => p.syncedAt !== null && new Date(p.syncedAt).getTime() >= syncStartedAt,
+      (p) => p.syncedAt === null || new Date(p.syncedAt).getTime() >= syncStartedAt,
     );
     if (allCaughtUp) setSyncStartedAt(null);
   }, [prs, syncStartedAt]);

@@ -42,6 +42,16 @@ async function main() {
   const db = openDb();
   db.prepare("INSERT INTO daemon_startups (started_at) VALUES (?)").run(new Date().toISOString());
 
+  const token = getGitHubToken();
+  const app = await buildServer(db, token ? syncPr : null, token ? syncCampaign : null);
+  await app.listen({ path: internalSocketPath });
+  console.log(`daemon listening on ${internalSocketPath} (db: ${dbPath})`);
+
+  // Resume after the server is listening so that the SessionStart hook fired
+  // by each resumed session can reach /hook-confirm immediately. If sessions
+  // are spawned before listen(), the hook's fire-and-forget POST gets ENOENT
+  // and hook_confirmed_at stays NULL, triggering a false "hooks not wired"
+  // warning 60 s later.
   const resumeIdMap = resumeSessionsOnBoot(db);
   if (resumeIdMap.size > 0) {
     // Point every pane that referenced a now-stale session at whatever
@@ -58,11 +68,6 @@ async function main() {
       updateTree.run(JSON.stringify(remapSessionIds(tree, resumeIdMap)), row.id);
     }
   }
-
-  const token = getGitHubToken();
-  const app = await buildServer(db, token ? syncPr : null, token ? syncCampaign : null);
-  await app.listen({ path: internalSocketPath });
-  console.log(`daemon listening on ${internalSocketPath} (db: ${dbPath})`);
 
   // Optional: expose this daemon over TCP (token-gated) so another machine's
   // daemon can use it as its remote peer — how the always-on box acts as the
