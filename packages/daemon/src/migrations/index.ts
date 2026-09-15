@@ -8,6 +8,12 @@ export interface Migration {
   // backfills that need JS logic (e.g. JSON tree construction) rather than
   // being expressible as a plain SQL statement.
   after?: (db: Database.Database) => void;
+  // Set for a migration that rebuilds a table referenced by others' foreign
+  // keys (SQLite has no ALTER COLUMN, so relaxing a NOT NULL/constraint means
+  // CREATE-copy-DROP-RENAME). `PRAGMA foreign_keys` is a no-op while a
+  // transaction is open, so db.ts toggles it off/on around this migration's
+  // transaction instead of inside it.
+  disableForeignKeys?: boolean;
 }
 
 // Applied in array order, once each, tracked in schema_migrations.
@@ -504,6 +510,58 @@ export const migrations: Migration[] = [
       -- resolveStepId's own comparison) makes the race resolve at the DB layer
       -- instead of silently forking the step.
       CREATE UNIQUE INDEX idx_campaign_steps_campaign_name ON campaign_steps(campaign_id, name COLLATE NOCASE);
+    `,
+  },
+  {
+    name: "0034_prs_nullable_step_id",
+    disableForeignKeys: true,
+    sql: `
+      -- A PR can now be registered with no step at all. SQLite can't ALTER
+      -- COLUMN to drop NOT NULL, so this rebuilds the table (foreign_keys is
+      -- disabled around this migration — see db.ts — since pr_pending_tasks
+      -- and pr_claims both reference prs(id)).
+      -- The old UNIQUE(step_id, repo_id) is replaced by two partial unique
+      -- indexes so routes/prs.ts's upsert can target the null-step and
+      -- real-step cases with separate ON CONFLICT clauses — a plain UNIQUE
+      -- already treats distinct NULLs as non-colliding, so this split is for
+      -- upsert targeting, not to prevent false collisions.
+      CREATE TABLE prs_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        step_id INTEGER REFERENCES campaign_steps(id),
+        repo_id INTEGER NOT NULL REFERENCES campaign_repos(id),
+        github_pr_number INTEGER,
+        github_node_id TEXT,
+        lifecycle TEXT NOT NULL DEFAULT 'not-started',
+        ci_status TEXT NOT NULL DEFAULT 'unknown',
+        ci_check_name TEXT,
+        review_approved INTEGER NOT NULL DEFAULT 0,
+        unaddressed_feedback INTEGER NOT NULL DEFAULT 0,
+        synced_at TEXT,
+        created_at TEXT NOT NULL,
+        ci_failure_signature_id INTEGER REFERENCES failure_signatures(id),
+        review_state TEXT NOT NULL DEFAULT 'missing',
+        branch_name TEXT
+      );
+
+      INSERT INTO prs_new (
+        id, step_id, repo_id, github_pr_number, github_node_id, lifecycle, ci_status,
+        ci_check_name, review_approved, unaddressed_feedback, synced_at, created_at,
+        ci_failure_signature_id, review_state, branch_name
+      )
+      SELECT
+        id, step_id, repo_id, github_pr_number, github_node_id, lifecycle, ci_status,
+        ci_check_name, review_approved, unaddressed_feedback, synced_at, created_at,
+        ci_failure_signature_id, review_state, branch_name
+      FROM prs;
+
+      DROP TABLE prs;
+      ALTER TABLE prs_new RENAME TO prs;
+
+      CREATE UNIQUE INDEX idx_prs_step_repo ON prs(step_id, repo_id) WHERE step_id IS NOT NULL;
+      CREATE UNIQUE INDEX idx_prs_repo_no_step ON prs(repo_id) WHERE step_id IS NULL;
+      CREATE INDEX IF NOT EXISTS prs_failure_sig_idx
+        ON prs(ci_failure_signature_id)
+        WHERE ci_failure_signature_id IS NOT NULL;
     `,
   },
 ];

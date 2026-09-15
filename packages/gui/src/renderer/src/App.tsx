@@ -729,6 +729,9 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
   const [name, setName] = useState("");
   const [context, setContext] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editContext, setEditContext] = useState("");
 
   useEffect(() => {
     setSelectedStepId((cur) => (cur !== null && steps.some((s) => s.id === cur) ? cur : (steps[0]?.id ?? null)));
@@ -766,6 +769,37 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
     reload(selectedStepId);
   };
 
+  const remove = async (taskId: number) => {
+    if (selectedStepId === null) return;
+    const res = await window.api.deleteTask(campaignId, selectedStepId, taskId);
+    if (!res.ok) setError(res.error);
+    reload(selectedStepId);
+  };
+
+  const startEdit = (task: TaskDefinition) => {
+    setEditingId(task.id);
+    setEditName(task.name);
+    setEditContext(task.context);
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedStepId === null || editingId === null) return;
+    setError(null);
+    const res = await window.api.updateTask(campaignId, selectedStepId, editingId, {
+      name: editName,
+      context: editContext,
+    });
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setEditingId(null);
+    reload(selectedStepId);
+  };
+
   if (steps.length === 0) return null;
 
   return (
@@ -787,17 +821,40 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
 
       <ul className="rule-list">
         {tasks.length === 0 && <span className="empty-hint">No tasks for this step yet.</span>}
-        {tasks.map((t) => (
-          <li key={t.id} className="rule-item">
-            <div className="rule-item-row">
-              <code>{t.name}</code>
-              <div className="rule-item-actions">
-                <button onClick={() => retire(t.id)}>Retire</button>
+        {tasks.map((t) =>
+          editingId === t.id ? (
+            <li key={t.id} className="rule-item">
+              <form className="rule-edit-form" onSubmit={saveEdit}>
+                <div className="rule-item-row">
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                  <div className="rule-item-actions">
+                    <button type="submit">Save</button>
+                    <button type="button" onClick={cancelEdit}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  className="rule-item-context rule-edit-context"
+                  value={editContext}
+                  onChange={(e) => setEditContext(e.target.value)}
+                />
+              </form>
+            </li>
+          ) : (
+            <li key={t.id} className="rule-item">
+              <div className="rule-item-row">
+                <code>{t.name}</code>
+                <div className="rule-item-actions">
+                  <button onClick={() => startEdit(t)}>Edit</button>
+                  <button onClick={() => remove(t.id)}>Delete</button>
+                  <button onClick={() => retire(t.id)}>Retire</button>
+                </div>
               </div>
-            </div>
-            <span className="rule-item-context">{t.context}</span>
-          </li>
-        ))}
+              <span className="rule-item-context">{t.context}</span>
+            </li>
+          ),
+        )}
       </ul>
 
       {showForm ? (

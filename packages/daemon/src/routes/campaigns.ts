@@ -176,9 +176,13 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
         `DELETE FROM pr_claims WHERE pr_id IN
            (SELECT p.id FROM prs p JOIN campaign_steps cs ON cs.id = p.step_id WHERE cs.campaign_id = ?)`,
       ).run(req.params.id);
-      db.prepare(`DELETE FROM prs WHERE step_id IN (SELECT id FROM campaign_steps WHERE campaign_id = ?)`).run(
-        req.params.id,
-      );
+      // A stepless PR only has repo_id linking it to the campaign, so it must
+      // be caught by that in addition to step_id (a step-having PR).
+      db.prepare(
+        `DELETE FROM prs WHERE
+           step_id IN (SELECT id FROM campaign_steps WHERE campaign_id = ?)
+           OR repo_id IN (SELECT id FROM campaign_repos WHERE campaign_id = ?)`,
+      ).run(req.params.id, req.params.id);
       db.prepare(
         `DELETE FROM task_definitions WHERE step_id IN (SELECT id FROM campaign_steps WHERE campaign_id = ?)`,
       ).run(req.params.id);

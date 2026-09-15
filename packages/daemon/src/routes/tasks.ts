@@ -120,4 +120,68 @@ export function registerTaskRoutes(app: FastifyInstance, db: Database.Database) 
       return toTask(row);
     },
   );
+
+  app.patch<{
+    Params: { campaignId: string; stepId: string; taskId: string };
+    Body: Partial<{ name: string; context: string }>;
+  }>("/campaigns/:campaignId/steps/:stepId/tasks/:taskId", async (req, reply) => {
+    const task = db
+      .prepare(
+        "SELECT td.id FROM task_definitions td JOIN campaign_steps cs ON cs.id = td.step_id WHERE td.id = ? AND cs.campaign_id = ? AND td.step_id = ?",
+      )
+      .get(req.params.taskId, req.params.campaignId, req.params.stepId);
+    if (!task) {
+      reply.code(404);
+      return { error: "task not found" };
+    }
+
+    const body = req.body ?? {};
+    const allowed = ["name", "context"] as const;
+    const updates: string[] = [];
+    const values: unknown[] = [];
+
+    for (const key of allowed) {
+      const value = body[key];
+      if (value === undefined) continue;
+      if (!value.trim()) {
+        reply.code(400);
+        return { error: `${key} cannot be empty` };
+      }
+      updates.push(`${key} = ?`);
+      values.push(value.trim());
+    }
+
+    if (updates.length === 0) {
+      reply.code(400);
+      return { error: "no updatable fields provided" };
+    }
+
+    values.push(req.params.taskId);
+    db.prepare(`UPDATE task_definitions SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+
+    const updated = db
+      .prepare("SELECT * FROM task_definitions WHERE id = ?")
+      .get(req.params.taskId) as TaskDefinitionRow;
+    return toTask(updated);
+  });
+
+  app.delete<{ Params: { campaignId: string; stepId: string; taskId: string } }>(
+    "/campaigns/:campaignId/steps/:stepId/tasks/:taskId",
+    async (req, reply) => {
+      const task = db
+        .prepare(
+          "SELECT td.id FROM task_definitions td JOIN campaign_steps cs ON cs.id = td.step_id WHERE td.id = ? AND cs.campaign_id = ? AND td.step_id = ?",
+        )
+        .get(req.params.taskId, req.params.campaignId, req.params.stepId);
+      if (!task) {
+        reply.code(404);
+        return { error: "task not found" };
+      }
+      db.transaction(() => {
+        db.prepare("DELETE FROM pr_pending_tasks WHERE task_definition_id = ?").run(req.params.taskId);
+        db.prepare("DELETE FROM task_definitions WHERE id = ?").run(req.params.taskId);
+      })();
+      reply.code(204);
+    },
+  );
 }

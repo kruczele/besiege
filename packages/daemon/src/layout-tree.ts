@@ -11,10 +11,20 @@
 // import.
 import { randomUUID } from "node:crypto";
 
+// A note pinned into a leaf by the pin_note MCP tool — see routes/layouts.ts
+// POST /pin-note. Mutually exclusive with sessionId by construction: a leaf
+// either holds a live terminal session or a pinned note, never both.
+export interface PaneNote {
+  title: string;
+  content: string;
+  createdAt: string;
+}
+
 export interface PaneLeaf {
   type: "leaf";
   id: string;
   sessionId: number | null;
+  note?: PaneNote | null;
 }
 
 export interface PaneSplit {
@@ -123,6 +133,50 @@ export function closePane(node: PaneNode, targetId: string): PaneNode | null {
   if (survivors.length === 1) return survivors[0].child;
   const total = survivors.reduce((sum, s) => sum + s.size, 0);
   return { ...node, children: survivors.map((s) => s.child), sizes: survivors.map((s) => s.size / total) };
+}
+
+// Pins `note` into a new leaf placed directly below (dir "col") the leaf
+// `targetId` — same placement logic as splitPane(node, targetId, "col"), but
+// the new leaf comes pre-filled with the note instead of empty. Returns null
+// if targetId wasn't found in this tree, so the caller (POST /pin-note) can
+// tell "pinned" apart from "no such pane".
+export function pinNote(node: PaneNode, targetId: string, note: PaneNote): PaneNode | null {
+  const noteLeaf: PaneLeaf = { type: "leaf", id: randomUUID(), sessionId: null, note };
+
+  if (node.type === "leaf") {
+    if (node.id !== targetId) return null;
+    return { type: "split", id: randomUUID(), dir: "col", children: [node, noteLeaf], sizes: [0.5, 0.5] };
+  }
+
+  const idx = node.children.findIndex((c) => c.type === "leaf" && c.id === targetId);
+  if (idx !== -1) {
+    if (node.dir === "col") {
+      const children = [...node.children.slice(0, idx + 1), noteLeaf, ...node.children.slice(idx + 1)];
+      return { ...node, children, sizes: equalSizes(children.length) };
+    }
+    const wrapped: PaneSplit = {
+      type: "split",
+      id: randomUUID(),
+      dir: "col",
+      children: [node.children[idx], noteLeaf],
+      sizes: [0.5, 0.5],
+    };
+    const children = [...node.children];
+    children[idx] = wrapped;
+    return { ...node, children };
+  }
+
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    if (child.type !== "split") continue;
+    const result = pinNote(child, targetId, note);
+    if (result) {
+      const children = [...node.children];
+      children[i] = result;
+      return { ...node, children };
+    }
+  }
+  return null;
 }
 
 export function findLeaf(node: PaneNode, targetId: string): PaneLeaf | null {
