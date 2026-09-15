@@ -28,11 +28,15 @@ export function openDb(): Database.Database {
 
   for (const migration of migrations) {
     if (applied.has(migration.name)) continue;
+    // PRAGMA foreign_keys is a silent no-op while a transaction is open, so
+    // it has to be toggled outside db.transaction() below, not inside it.
+    if (migration.disableForeignKeys) db.pragma("foreign_keys = OFF");
     db.transaction(() => {
       db.exec(migration.sql);
       migration.after?.(db);
       insertMigration.run(migration.name, new Date().toISOString());
     })();
+    if (migration.disableForeignKeys) db.pragma("foreign_keys = ON");
   }
 
   return db;

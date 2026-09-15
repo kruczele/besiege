@@ -3,8 +3,8 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
-import type { AgentAdapter, Campaign, PaneNode, TerminalLayout, TerminalSession } from "../../shared/types.js";
+import { Copy, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
+import type { AgentAdapter, Campaign, PaneNode, PaneNote, TerminalLayout, TerminalSession } from "../../shared/types.js";
 import { closePane, emptyTree, leavesInOrder, setPaneSession, setSizes, splitPane } from "./pane-tree.js";
 
 const POLL_SESSIONS = 3000;
@@ -168,9 +168,33 @@ function PaneLauncher({
   );
 }
 
+// Short relative-age string ("3s", "5m", "2h 4m") — a local duplicate of
+// App.tsx's elapsed(), kept separate rather than imported since App.tsx
+// already imports this module (importing back would be circular).
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+// A panel pinned by the pin_note MCP tool — plain, pre-wrapped text (not
+// rendered markdown) so it shows exactly what the agent sent, with no new
+// rendering dependency.
+function NotePane({ note }: { note: PaneNote }) {
+  return (
+    <div className="pane-note">
+      <div className="pane-note-meta">pinned {relativeTime(note.createdAt)} ago</div>
+      <pre className="pane-note-content">{note.content}</pre>
+    </div>
+  );
+}
+
 // Recursively renders a PaneNode: a split becomes two flex children plus a
-// draggable divider, a leaf becomes either a live terminal pane or (session
-// null) the launcher above.
+// draggable divider, a leaf becomes a live terminal pane, a pinned note
+// panel, or (session null, note null) the launcher above.
 function PaneView({
   node,
   sessions,
@@ -230,9 +254,17 @@ function PaneView({
     <div className={`terminal-grid-pane ${isActive ? "active" : ""}`} onMouseDownCapture={() => onActivate(node.id)}>
       <div className="terminal-grid-pane-header">
         <span className={`terminal-grid-pane-title ${isExited ? "exited" : ""}`}>
-          {session ? titles[session.id] ?? session.label ?? `Terminal #${session.id}` : "Empty"}
+          {node.note ? node.note.title : session ? titles[session.id] ?? session.label ?? `Terminal #${session.id}` : "Empty"}
         </span>
         <div className="terminal-grid-pane-actions">
+          {node.note && (
+            <button
+              title="Copy pinned text"
+              onClick={() => void navigator.clipboard.writeText(node.note!.content).catch(() => {})}
+            >
+              <Copy size={13} />
+            </button>
+          )}
           <button title="Split right" onClick={() => onSplit(node.id, "row")}>
             <PanelRightOpen size={13} />
           </button>
@@ -244,7 +276,9 @@ function PaneView({
           </button>
         </div>
       </div>
-      {node.sessionId === null ? (
+      {node.note ? (
+        <NotePane note={node.note} />
+      ) : node.sessionId === null ? (
         <PaneLauncher adapters={adapters} onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)} />
       ) : !session ? (
         <p className="status status-pending pane-loading">Loading…</p>

@@ -90,7 +90,7 @@ async function resolveStepId(campaign: string, step: string): Promise<number> {
 async function resolvePrId(
   campaign: string,
   repo: string,
-  step: string,
+  step: string | undefined,
   githubPrNumber?: number,
   githubNodeId?: string,
   // POST /prs backfills github_node_id from a live GitHub call when only a PR
@@ -98,11 +98,12 @@ async function resolvePrId(
   // than the 2s default the daemon socket otherwise uses for everything else.
   timeoutMs?: number,
 ): Promise<number> {
-  const [repoId, stepId] = await Promise.all([resolveRepoId(campaign, repo), resolveStepId(campaign, step)]);
-  // Upsert — idempotent per the UNIQUE(step_id, repo_id) constraint, same as
-  // `besiege dispatch` (cli.ts). github_pr_number/github_node_id are
-  // COALESCEd server-side, so omitting them here never clobbers a value
-  // register_pr already set.
+  const repoId = await resolveRepoId(campaign, repo);
+  const stepId = step ? await resolveStepId(campaign, step) : null;
+  // Upsert — idempotent per the partial unique indexes on (step_id, repo_id)
+  // / (repo_id) WHERE step_id IS NULL, same as `besiege dispatch` (cli.ts).
+  // github_pr_number/github_node_id are COALESCEd server-side, so omitting
+  // them here never clobbers a value register_pr already set.
   const pr = await postJson<Pr>(
     "/prs",
     {
@@ -283,11 +284,15 @@ const TOOLS = [
             type: "object",
             properties: {
               repo: { type: "string", description: 'GitHub full name, e.g. "org/repo"' },
-              step: { type: "string", description: "Step name within the campaign" },
+              step: {
+                type: "string",
+                description:
+                  "Step name within the campaign. Optional — omit to register the PR with no step association.",
+              },
               githubPrNumber: { type: "number", description: "The PR number from GitHub, e.g. 42" },
               githubNodeId: { type: "string", description: "Optional GitHub GraphQL node id, if you have it" },
             },
-            required: ["repo", "step", "githubPrNumber"],
+            required: ["repo", "githubPrNumber"],
           },
         },
         campaign: CAMPAIGN_PROPERTY,
@@ -359,6 +364,25 @@ const TOOLS = [
         message: { type: "string", description: "The question or message for the operator" },
       },
       required: ["message"],
+    },
+  },
+  {
+    name: "pin_note",
+    description:
+      "Pin text to a new panel in the GUI grid, opened directly below the pane running this session — " +
+      "use when the user asks to pin, keep on screen, or save something (e.g. a summary) so it stops " +
+      "scrolling away as the conversation continues. Only works when this session is running in a " +
+      "Besiege GUI pane (not a headless besiege dispatch run).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        title: {
+          type: "string",
+          description: 'Short panel title, e.g. "PR failure summary". Defaults to "Pinned".',
+        },
+        content: { type: "string", description: "The text to pin, shown as-is (plain text, not rendered)." },
+      },
+      required: ["content"],
     },
   },
 ];
@@ -438,7 +462,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         const outcomes = await mapWithConcurrency(entries, REGISTER_PR_CONCURRENCY, async (raw) => {
           const entry = raw as { repo?: string; step?: string; githubPrNumber?: number; githubNodeId?: string };
-          if (!entry.repo || !entry.step || !entry.githubPrNumber) {
+          if (!entry.repo || !entry.githubPrNumber) {
             throw new Error(`invalid entry: ${JSON.stringify(raw)}`);
           }
           const prId = await resolvePrId(
@@ -449,7 +473,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
             entry.githubNodeId,
             REGISTER_PR_TIMEOUT_MS,
           );
-          return `${entry.repo} (${entry.step}) -> PR #${entry.githubPrNumber}, pr id ${prId}`;
+          return `${entry.repo}${entry.step ? ` (${entry.step})` : ""} -> PR #${entry.githubPrNumber}, pr id ${prId}`;
         });
         const lines = outcomes.map((o, i) =>
           o.status === "fulfilled"
@@ -500,6 +524,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (!message) throw new Error("message is required");
         await postJson("/notifications", { sessionId: SESSION_ID, cwd: process.cwd(), message });
         return { content: [{ type: "text", text: "Notification sent." }] };
+      }
+
+      case "pin_note": {
+        const { title, content } = a;
+        if (!content) throw new Error("content is required");
+        await postJson("/pin-note", { sessionId: SESSION_ID, title, content });
+        return { content: [{ type: "text", text: "Pinned to a new panel below this pane." }] };
       }
 
       default:

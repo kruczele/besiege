@@ -110,7 +110,8 @@ export type ReviewState = "missing" | "changes-requested" | "approved";
 
 export interface Pr {
   id: number;
-  stepId: number;
+  // Null means the PR was registered with no step association.
+  stepId: number | null;
   repoId: number;
   githubPrNumber: number | null;
   githubNodeId: string | null;
@@ -125,8 +126,8 @@ export interface Pr {
 
 export interface PrGridRow extends Pr {
   repoName: string;
-  stepName: string;
-  stepOrder: number;
+  stepName: string | null;
+  stepOrder: number | null;
   pendingTasksCount: number;
 }
 

@@ -1,6 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
-import { emptyTree, remapSessionIds, sessionIdsInTree, type PaneNode } from "../layout-tree.js";
+import {
+  emptyTree,
+  leavesInOrder,
+  pinNote,
+  remapSessionIds,
+  sessionIdsInTree,
+  type PaneNode,
+} from "../layout-tree.js";
 
 interface TerminalLayoutRow {
   id: number;
@@ -126,4 +133,52 @@ export function registerLayoutRoutes(app: FastifyInstance, db: Database.Database
     }
     reply.code(204);
   });
+
+  // Backs the pin_note MCP tool (mcp.ts) — pins agent-supplied text into a
+  // new panel directly below whichever pane is running the calling session,
+  // so it stays on screen outside that terminal's own scrollback. `sessionId`
+  // is BESIEGE_SESSION_ID (the agent_session_id string), same identity the
+  // notify tool already uses — resolved here to the numeric terminal_sessions
+  // id the layout tree actually stores.
+  app.post<{ Body: { sessionId?: string; title?: string; content?: string } }>(
+    "/pin-note",
+    async (req, reply) => {
+      const { sessionId, title, content } = req.body ?? {};
+      if (!sessionId?.trim() || !content?.trim()) {
+        reply.code(400);
+        return { error: "sessionId and content are both required" };
+      }
+
+      const session = db
+        .prepare("SELECT id, campaign_id FROM terminal_sessions WHERE agent_session_id = ? ORDER BY id DESC LIMIT 1")
+        .get(sessionId.trim()) as { id: number; campaign_id: number } | undefined;
+      if (!session) {
+        reply.code(404);
+        return { error: "no terminal session found for this sessionId" };
+      }
+
+      const rows = db
+        .prepare("SELECT * FROM terminal_layouts WHERE campaign_id = ? ORDER BY id ASC")
+        .all(session.campaign_id) as TerminalLayoutRow[];
+
+      for (const row of rows) {
+        const tree = JSON.parse(row.layout_tree) as PaneNode;
+        const leaf = leavesInOrder(tree).find((l) => l.sessionId === session.id);
+        if (!leaf) continue;
+
+        const pinned = pinNote(tree, leaf.id, {
+          title: title?.trim() || "Pinned",
+          content: content.trim(),
+          createdAt: new Date().toISOString(),
+        });
+        if (!pinned) continue; // shouldn't happen — leaf was just found in this same tree
+
+        db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?").run(JSON.stringify(pinned), row.id);
+        return { ok: true, layoutId: row.id, paneId: leaf.id };
+      }
+
+      reply.code(404);
+      return { error: "no open pane found for this session" };
+    },
+  );
 }

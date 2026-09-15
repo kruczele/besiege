@@ -85,10 +85,21 @@ export interface AgentAdapter {
 // child split's dir is never equal to its parent's. Mirrored (duplicated, not
 // shared — different runtimes) in packages/daemon/src/layout-tree.ts, which
 // owns the authoritative pure tree-manipulation functions server-side.
+//
+// A note pinned into a leaf by the pin_note MCP tool (daemon POST
+// /pin-note). Mutually exclusive with sessionId by construction: a leaf
+// either holds a live terminal session or a pinned note, never both.
+export interface PaneNote {
+  title: string;
+  content: string;
+  createdAt: string;
+}
+
 export interface PaneLeaf {
   type: "leaf";
   id: string;
   sessionId: number | null;
+  note?: PaneNote | null;
 }
 
 export interface PaneSplit {
@@ -141,7 +152,8 @@ export type ReviewState = "missing" | "changes-requested" | "approved";
 
 export interface Pr {
   id: number;
-  stepId: number;
+  // Null means the PR was registered with no step association.
+  stepId: number | null;
   repoId: number;
   githubPrNumber: number | null;
   githubNodeId: string | null;
@@ -159,8 +171,8 @@ export interface Pr {
 
 export interface PrGridRow extends Pr {
   repoName: string;
-  stepName: string;
-  stepOrder: number;
+  stepName: string | null;
+  stepOrder: number | null;
   pendingTasksCount: number;
 }
 

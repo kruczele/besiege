@@ -5,7 +5,7 @@ import { fetchPrNodeId, getGitHubToken } from "../github.js";
 
 interface PrRow {
   id: number;
-  step_id: number;
+  step_id: number | null;
   repo_id: number;
   github_pr_number: number | null;
   github_node_id: string | null;
@@ -125,15 +125,15 @@ export function registerPrRoutes(
                  WHERE pt.pr_id = p.id AND pt.closed_at IS NULL) AS pending_tasks_count
          FROM prs p
          JOIN campaign_repos cr ON cr.id = p.repo_id
-         JOIN campaign_steps cs ON cs.id = p.step_id
-         WHERE cs.campaign_id = ?
+         LEFT JOIN campaign_steps cs ON cs.id = p.step_id
+         WHERE cr.campaign_id = ?
          ${filterClause}
-         ORDER BY cs.step_order ASC, cr.github_full_name ASC`,
+         ORDER BY (cs.step_order IS NULL) ASC, cs.step_order ASC, cr.github_full_name ASC`,
       )
       .all(...params) as (PrRow & {
         repo_name: string;
-        step_name: string;
-        step_order: number;
+        step_name: string | null;
+        step_order: number | null;
         pending_tasks_count: number;
       })[];
 
@@ -146,24 +146,28 @@ export function registerPrRoutes(
     }));
   });
 
-  // Register or upsert a PR for a (step, repo) slot.
+  // Register or upsert a PR for a (step, repo) slot — step is optional, so a
+  // PR can be registered against just a repo with no step association at all.
   app.post<{
     Body: {
-      step_id?: number;
+      step_id?: number | null;
       repo_id?: number;
       github_pr_number?: number;
       github_node_id?: string;
     };
   }>("/prs", async (req, reply) => {
     const { step_id, repo_id, github_pr_number, github_node_id } = req.body ?? {};
-    if (!step_id || !repo_id) {
+    if (!repo_id) {
       reply.code(400);
-      return { error: "step_id and repo_id are required" };
+      return { error: "repo_id is required" };
     }
-    const step = db.prepare("SELECT id FROM campaign_steps WHERE id = ?").get(step_id);
-    if (!step) {
-      reply.code(404);
-      return { error: "step not found" };
+    const stepId = step_id ?? null;
+    if (stepId !== null) {
+      const step = db.prepare("SELECT id FROM campaign_steps WHERE id = ?").get(stepId);
+      if (!step) {
+        reply.code(404);
+        return { error: "step not found" };
+      }
     }
     const repo = db.prepare("SELECT id FROM campaign_repos WHERE id = ?").get(repo_id);
     if (!repo) {
@@ -177,15 +181,19 @@ export function registerPrRoutes(
     db.prepare(
       `INSERT INTO prs (step_id, repo_id, github_pr_number, github_node_id, lifecycle, created_at)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(step_id, repo_id) DO UPDATE SET
+       ON CONFLICT(step_id, repo_id) WHERE step_id IS NOT NULL DO UPDATE SET
+         github_pr_number = COALESCE(excluded.github_pr_number, github_pr_number),
+         github_node_id   = COALESCE(excluded.github_node_id,   github_node_id),
+         lifecycle        = CASE WHEN excluded.lifecycle != 'not-started' THEN excluded.lifecycle ELSE lifecycle END
+       ON CONFLICT(repo_id) WHERE step_id IS NULL DO UPDATE SET
          github_pr_number = COALESCE(excluded.github_pr_number, github_pr_number),
          github_node_id   = COALESCE(excluded.github_node_id,   github_node_id),
          lifecycle        = CASE WHEN excluded.lifecycle != 'not-started' THEN excluded.lifecycle ELSE lifecycle END`,
-    ).run(step_id, repo_id, github_pr_number ?? null, github_node_id ?? null, lifecycle, now);
+    ).run(stepId, repo_id, github_pr_number ?? null, github_node_id ?? null, lifecycle, now);
 
     let row = db
-      .prepare("SELECT * FROM prs WHERE step_id = ? AND repo_id = ?")
-      .get(step_id, repo_id) as PrRow;
+      .prepare("SELECT * FROM prs WHERE step_id IS ? AND repo_id = ?")
+      .get(stepId, repo_id) as PrRow;
 
     // register_pr only requires a PR number, not a node id — without one,
     // branch_name/CI/review state can never be filled in by syncPr/

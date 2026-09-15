@@ -36,6 +36,8 @@ import {
   updateCampaign,
   updateConfigRule,
   updateLayout,
+  updateTask,
+  deleteTask,
 } from "./daemon-client.js";
 import * as terminalBridge from "./terminal-bridge.js";
 import type { PaneNode } from "../shared/types.js";
@@ -181,6 +183,14 @@ daemonHandle("tasks:create", (campaignId: number, stepId: number, name: string, 
 );
 daemonHandle("tasks:retire", (campaignId: number, stepId: number, taskId: number) =>
   retireTask(campaignId, stepId, taskId),
+);
+daemonHandle(
+  "tasks:update",
+  (campaignId: number, stepId: number, taskId: number, fields: Record<string, unknown>) =>
+    updateTask(campaignId, stepId, taskId, fields),
+);
+daemonHandle("tasks:delete", (campaignId: number, stepId: number, taskId: number) =>
+  deleteTask(campaignId, stepId, taskId),
 );
 
 daemonHandle("claims:release", (prId: number) => releasePrClaim(prId));

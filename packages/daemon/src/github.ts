@@ -234,9 +234,8 @@ export async function syncCampaign(db: Database.Database, campaignId: string | n
     .prepare(
       `SELECT p.id, p.github_pr_number, p.github_node_id, cr.github_full_name AS repo_full_name
        FROM prs p
-       JOIN campaign_steps cs ON cs.id = p.step_id
        JOIN campaign_repos cr ON cr.id = p.repo_id
-       WHERE cs.campaign_id = ?
+       WHERE cr.campaign_id = ?
          AND p.github_pr_number IS NOT NULL
          AND p.github_node_id IS NULL
          AND p.lifecycle NOT IN ('merged', 'closed')`,
@@ -262,8 +261,8 @@ export async function syncCampaign(db: Database.Database, campaignId: string | n
     .prepare(
       `SELECT p.id, p.github_node_id
        FROM prs p
-       JOIN campaign_steps cs ON cs.id = p.step_id
-       WHERE cs.campaign_id = ?
+       JOIN campaign_repos cr ON cr.id = p.repo_id
+       WHERE cr.campaign_id = ?
          AND p.github_node_id IS NOT NULL
          AND p.lifecycle NOT IN ('merged', 'closed')`,
     )

@@ -1103,6 +1103,35 @@ h1 {
   margin: auto;
 }
 
+.pane-note {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.pane-note-meta {
+  flex-shrink: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-note-content {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0.6rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 .pane-launcher {
   flex: 1;
   display: flex;

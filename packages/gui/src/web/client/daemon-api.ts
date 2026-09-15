@@ -65,6 +65,14 @@ export const createTask = (campaignId: number, stepId: number, name: string, con
   callDaemon<TaskDefinition>("POST", `/campaigns/${campaignId}/steps/${stepId}/tasks`, { name, context });
 export const retireTask = (campaignId: number, stepId: number, taskId: number) =>
   callDaemon<TaskDefinition>("POST", `/campaigns/${campaignId}/steps/${stepId}/tasks/${taskId}/retire`);
+export const updateTask = (
+  campaignId: number,
+  stepId: number,
+  taskId: number,
+  fields: Partial<{ name: string; context: string }>,
+) => callDaemon<TaskDefinition>("PATCH", `/campaigns/${campaignId}/steps/${stepId}/tasks/${taskId}`, fields);
+export const deleteTask = (campaignId: number, stepId: number, taskId: number) =>
+  callDaemon<void>("DELETE", `/campaigns/${campaignId}/steps/${stepId}/tasks/${taskId}`);
 
 export const fetchCampaignPrs = (campaignId: number, filter?: "needs-me") =>
   callDaemon<PrGridRow[]>("GET", `/campaigns/${campaignId}/prs${filter ? `?filter=${filter}` : ""}`);

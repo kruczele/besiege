@@ -75,6 +75,15 @@ const api = {
     ipcRenderer.invoke("tasks:create", campaignId, stepId, name, context),
   retireTask: (campaignId: number, stepId: number, taskId: number): Promise<DaemonResult<TaskDefinition>> =>
     ipcRenderer.invoke("tasks:retire", campaignId, stepId, taskId),
+  updateTask: (
+    campaignId: number,
+    stepId: number,
+    taskId: number,
+    fields: Partial<{ name: string; context: string }>,
+  ): Promise<DaemonResult<TaskDefinition>> =>
+    ipcRenderer.invoke("tasks:update", campaignId, stepId, taskId, fields),
+  deleteTask: (campaignId: number, stepId: number, taskId: number): Promise<DaemonResult<void>> =>
+    ipcRenderer.invoke("tasks:delete", campaignId, stepId, taskId),
 
   releaseClaim: (prId: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("claims:release", prId),
 
