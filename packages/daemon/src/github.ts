@@ -6,6 +6,13 @@ interface PrRow {
   github_node_id: string;
 }
 
+interface PrRowPartial {
+  id: number;
+  github_pr_number: number | null;
+  github_node_id: string | null;
+  repo_full_name: string;
+}
+
 interface GitHubPrState {
   lifecycle: string;
   ciStatus: string;
@@ -220,6 +227,36 @@ export async function syncPr(db: Database.Database, prId: number): Promise<void>
 export async function syncCampaign(db: Database.Database, campaignId: string | number): Promise<void> {
   const token = getGitHubToken();
   if (!token) return;
+
+  // Resolve node IDs for any PRs that are still missing one (e.g. registered
+  // by number only and fetchPrNodeId failed at registration time).
+  const unresolved = db
+    .prepare(
+      `SELECT p.id, p.github_pr_number, p.github_node_id, cr.github_full_name AS repo_full_name
+       FROM prs p
+       JOIN campaign_steps cs ON cs.id = p.step_id
+       JOIN campaign_repos cr ON cr.id = p.repo_id
+       WHERE cs.campaign_id = ?
+         AND p.github_pr_number IS NOT NULL
+         AND p.github_node_id IS NULL
+         AND p.lifecycle NOT IN ('merged', 'closed')`,
+    )
+    .all(campaignId) as PrRowPartial[];
+
+  for (const pr of unresolved) {
+    try {
+      const resolved = await fetchPrNodeId(pr.repo_full_name, pr.github_pr_number!, token);
+      if (resolved) {
+        db.prepare("UPDATE prs SET github_node_id = ?, branch_name = COALESCE(branch_name, ?) WHERE id = ?").run(
+          resolved.nodeId,
+          resolved.branchName,
+          pr.id,
+        );
+      }
+    } catch {
+      // Best-effort — skip this PR for now, will retry on next sync.
+    }
+  }
 
   const prs = db
     .prepare(
