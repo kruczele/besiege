@@ -250,11 +250,15 @@ function groupByBranch(prs: PrGridRow[]): { branch: string; prs: PrGridRow[] }[]
   );
 }
 
-// A 2D CI×review breakdown of every PR in the campaign — the thing the
-// repo×step grid below never showed at all (it only ever surfaced lifecycle
-// + CI, never review state). Every cell starts expanded except the fully
-// "safe" one (green + approved): that's the "good to go" pile the operator
-// explicitly doesn't need to look at, so it collapses to a count.
+// A branch×CI×review breakdown of every PR in the campaign — branch is the
+// outermost grouping because a campaign typically pushes the same branch
+// name across every repo it touches, so "this branch is still failing CI"
+// is the operator's real unit of attention, not an isolated PR. Branches
+// start collapsed so the board opens as a scannable list of names instead
+// of a wall of PRs. Within an expanded branch, every review cell starts
+// expanded except the fully "safe" one (green + approved): that's the
+// "good to go" pile the operator explicitly doesn't need to look at, so it
+// collapses to a count.
 function PrBoard({
   prs,
   onDeleted,
@@ -286,130 +290,129 @@ function PrBoard({
       else next.add(key);
       return next;
     });
-  const toggleBranch = (key: string) =>
+  const toggleBranch = (branch: string) =>
     setExpandedBranches((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(branch)) next.delete(branch);
+      else next.add(branch);
       return next;
     });
 
   return (
     <div className="pr-board">
       {active.length === 0 && <p className="status status-pending">No open PRs need attention.</p>}
-      {CI_BUCKETS.map((ci) => {
-        const ciPrs = active.filter(ci.match);
-        if (ciPrs.length === 0) return null;
+      {groupByBranch(active).map((g) => {
+        const branchExpanded = expandedBranches.has(g.branch);
         return (
-          <div key={ci.key} className="pr-board-row">
-            <h3 className="pr-board-row-title">
-              {ci.label} <span className="pr-board-count">{ciPrs.length}</span>
-            </h3>
-            <div className="pr-board-row-cells">
-              {REVIEW_BUCKETS.map((rv) => {
-                const cellPrs = ciPrs.filter(rv.match);
-                if (cellPrs.length === 0) return null;
-                const cellKey = `${ci.key}|${rv.key}`;
-                const isSafe = cellKey === "passing|approved";
-                const expanded = !collapsedCells.has(cellKey);
-                const openablePrs = cellPrs.filter((p) => p.githubPrNumber != null);
-                return (
-                  <div
-                    key={rv.key}
-                    className={`pr-board-cell ${isSafe ? "pr-board-cell-safe" : "pr-board-cell-attention"}`}
-                  >
-                    <div className="pr-board-cell-header-row">
-                      <button className="pr-board-cell-header" onClick={() => toggleCell(cellKey)}>
-                        <span>
-                          {expanded ? "▾" : "▸"} {rv.label}
-                        </span>
-                        <span className="pr-board-count">{cellPrs.length}</span>
-                      </button>
-                      {openablePrs.length > 0 && (
-                        <button
-                          className="pr-board-cell-open-all"
-                          title={`Open all ${openablePrs.length} in browser`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            for (const p of openablePrs) {
-                              void window.api.openExternal(`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`);
-                            }
-                          }}
-                        >
-                          Open all
-                        </button>
-                      )}
-                    </div>
-                    {expanded && (
-                      <ul className="pr-board-branch-list">
-                        {groupByBranch(cellPrs).map((g) => {
-                          const branchKey = `${cellKey}|${g.branch}`;
-                          const branchExpanded = expandedBranches.has(branchKey);
+          <div key={g.branch} className="pr-board-row">
+            <button className="pr-board-branch-header" onClick={() => toggleBranch(g.branch)}>
+              <span>
+                {branchExpanded ? "▾" : "▸"} <code>{g.branch}</code>
+              </span>
+              <span className="pr-board-count">{g.prs.length}</span>
+            </button>
+            {branchExpanded && (
+              <div className="pr-board" style={{ paddingLeft: "0.8rem" }}>
+                {CI_BUCKETS.map((ci) => {
+                  const ciPrs = g.prs.filter(ci.match);
+                  if (ciPrs.length === 0) return null;
+                  return (
+                    <div key={ci.key}>
+                      <h3 className="pr-board-row-title">
+                        {ci.label} <span className="pr-board-count">{ciPrs.length}</span>
+                      </h3>
+                      <div className="pr-board-row-cells">
+                        {REVIEW_BUCKETS.map((rv) => {
+                          const cellPrs = ciPrs.filter(rv.match);
+                          if (cellPrs.length === 0) return null;
+                          const cellKey = `${ci.key}|${rv.key}`;
+                          const isSafe = cellKey === "passing|approved";
+                          const expanded = !collapsedCells.has(cellKey);
+                          const openablePrs = cellPrs.filter((p) => p.githubPrNumber != null);
                           return (
-                            <li key={g.branch}>
-                              <button className="pr-board-branch-header" onClick={() => toggleBranch(branchKey)}>
-                                <span>
-                                  {branchExpanded ? "▾" : "▸"} <code>{g.branch}</code>
-                                </span>
-                                <span className="pr-board-count">{g.prs.length}</span>
-                              </button>
-                              {branchExpanded && (
+                            <div
+                              key={rv.key}
+                              className={`pr-board-cell ${isSafe ? "pr-board-cell-safe" : "pr-board-cell-attention"}`}
+                            >
+                              <div className="pr-board-cell-header-row">
+                                <button className="pr-board-cell-header" onClick={() => toggleCell(cellKey)}>
+                                  <span>
+                                    {expanded ? "▾" : "▸"} {rv.label}
+                                  </span>
+                                  <span className="pr-board-count">{cellPrs.length}</span>
+                                </button>
+                                {openablePrs.length > 0 && (
+                                  <button
+                                    className="pr-board-cell-open-all"
+                                    title={`Open all ${openablePrs.length} in browser`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      for (const p of openablePrs) {
+                                        void window.api.openExternal(
+                                          `https://github.com/${p.repoName}/pull/${p.githubPrNumber}`,
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Open all
+                                  </button>
+                                )}
+                              </div>
+                              {expanded && (
                                 <ul className="pr-board-repo-list">
-                                  {g.prs.map((p) => {
+                                  {cellPrs.map((p) => {
                                     const isStale =
                                       syncStartedAt !== null &&
                                       p.syncedAt !== null &&
                                       new Date(p.syncedAt).getTime() < syncStartedAt;
                                     return (
-                                    <li key={p.id} className="pr-board-pr-row">
-                                      <span className="pr-board-pr-row-status">
-                                        {isStale && (
-                                          <RefreshCw size={12} className="pr-board-pr-row-spin" />
-                                        )}
-                                      </span>
-                                      <span className="pr-board-pr-row-main">
-                                        {p.githubPrNumber != null ? (
-                                          <a
-                                            className="pr-board-pr-link"
-                                            href={`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            {p.repoName}
-                                            <span className="pr-board-pr-number"> #{p.githubPrNumber}</span>
-                                          </a>
-                                        ) : (
-                                          p.repoName
-                                        )}
-                                        {p.pendingTasksCount > 0 && (
-                                          <span className="pending-badge"> +{p.pendingTasksCount} pending</span>
-                                        )}
-                                      </span>
-                                      <button
-                                        className="pr-board-pr-delete"
-                                        title="Stop tracking this PR"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDelete(p.id);
-                                        }}
-                                      >
-                                        <X size={12} />
-                                      </button>
-                                    </li>
+                                      <li key={p.id} className="pr-board-pr-row">
+                                        <span className="pr-board-pr-row-status">
+                                          {isStale && <RefreshCw size={12} className="pr-board-pr-row-spin" />}
+                                        </span>
+                                        <span className="pr-board-pr-row-main">
+                                          {p.githubPrNumber != null ? (
+                                            <a
+                                              className="pr-board-pr-link"
+                                              href={`https://github.com/${p.repoName}/pull/${p.githubPrNumber}`}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              {p.repoName}
+                                              <span className="pr-board-pr-number"> #{p.githubPrNumber}</span>
+                                            </a>
+                                          ) : (
+                                            p.repoName
+                                          )}
+                                          {p.pendingTasksCount > 0 && (
+                                            <span className="pending-badge"> +{p.pendingTasksCount} pending</span>
+                                          )}
+                                        </span>
+                                        <button
+                                          className="pr-board-pr-delete"
+                                          title="Stop tracking this PR"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDelete(p.id);
+                                          }}
+                                        >
+                                          <X size={12} />
+                                        </button>
+                                      </li>
                                     );
                                   })}
                                 </ul>
                               )}
-                            </li>
+                            </div>
                           );
                         })}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}

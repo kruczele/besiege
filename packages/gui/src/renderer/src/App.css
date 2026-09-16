@@ -589,15 +589,6 @@ h1 {
   font-size: 0.75rem;
 }
 
-.pr-board-branch-list {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
 .pr-board-branch-header {
   display: flex;
   align-items: center;
