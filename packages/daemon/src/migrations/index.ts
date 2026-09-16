@@ -581,11 +581,77 @@ export const migrations: Migration[] = [
       -- otherwise every repeat claim on the same slot would insert a new row.
       DROP INDEX idx_prs_step_repo;
       DROP INDEX idx_prs_repo_no_step;
-
-      CREATE UNIQUE INDEX idx_prs_repo_pr_number ON prs(repo_id, github_pr_number) WHERE github_pr_number IS NOT NULL;
-      CREATE UNIQUE INDEX idx_prs_step_placeholder ON prs(step_id, repo_id) WHERE step_id IS NOT NULL AND github_pr_number IS NULL;
-      CREATE UNIQUE INDEX idx_prs_no_step_placeholder ON prs(repo_id) WHERE step_id IS NULL AND github_pr_number IS NULL;
     `,
+    // A real database can already have multiple prs rows sharing
+    // (repo_id, github_pr_number) under different steps — that's exactly the
+    // bug being fixed here, so CREATE UNIQUE INDEX below would fail against
+    // it otherwise. Merge those groups down to one row per (repo_id,
+    // github_pr_number) first, in JS (not expressible as a single DELETE),
+    // then create the new indexes. The two placeholder indexes need no such
+    // cleanup — they're strictly narrower than the old indexes they replace
+    // (same columns plus "AND github_pr_number IS NULL"), so any data that
+    // satisfied the old ones already satisfies these.
+    after: (db) => {
+      const dupGroups = db
+        .prepare(
+          `SELECT repo_id, github_pr_number
+           FROM prs
+           WHERE github_pr_number IS NOT NULL
+           GROUP BY repo_id, github_pr_number
+           HAVING COUNT(*) > 1`,
+        )
+        .all() as { repo_id: number; github_pr_number: number }[];
+
+      const now = new Date().toISOString();
+      for (const { repo_id, github_pr_number } of dupGroups) {
+        const rows = db
+          .prepare("SELECT * FROM prs WHERE repo_id = ? AND github_pr_number = ? ORDER BY id ASC")
+          .all(repo_id, github_pr_number) as {
+            id: number;
+            github_node_id: string | null;
+            branch_name: string | null;
+            synced_at: string | null;
+          }[];
+        // Prefer a row that's actually been synced (has a node id) as the
+        // survivor — most likely to carry accurate CI/review state — falling
+        // back to the most recently created one.
+        const keep = rows.find((r) => r.github_node_id) ?? rows[rows.length - 1];
+        for (const dup of rows) {
+          if (dup.id === keep.id) continue;
+          // Backfill anything the survivor is missing from this duplicate
+          // before dropping it, so merging doesn't erase state the survivor
+          // never got (e.g. a node id resolved on the row about to go away).
+          db.prepare(
+            `UPDATE prs SET
+               github_node_id = COALESCE(github_node_id, ?),
+               branch_name = COALESCE(branch_name, ?),
+               synced_at = COALESCE(synced_at, ?)
+             WHERE id = ?`,
+          ).run(dup.github_node_id, dup.branch_name, dup.synced_at, keep.id);
+          // Move pending tasks the survivor doesn't already have; drop the
+          // rest (pr_pending_tasks is UNIQUE(pr_id, task_definition_id)).
+          db.prepare(
+            `UPDATE pr_pending_tasks SET pr_id = ?
+             WHERE pr_id = ? AND task_definition_id NOT IN
+               (SELECT task_definition_id FROM pr_pending_tasks WHERE pr_id = ?)`,
+          ).run(keep.id, dup.id, keep.id);
+          db.prepare("DELETE FROM pr_pending_tasks WHERE pr_id = ?").run(dup.id);
+          // Release the duplicate's active claim (if any) before moving its
+          // claim history onto the survivor, which may already have an
+          // active claim of its own — pr_claims only allows one unreleased
+          // claim per pr_id.
+          db.prepare("UPDATE pr_claims SET released_at = COALESCE(released_at, ?) WHERE pr_id = ?").run(now, dup.id);
+          db.prepare("UPDATE pr_claims SET pr_id = ? WHERE pr_id = ?").run(keep.id, dup.id);
+          db.prepare("DELETE FROM prs WHERE id = ?").run(dup.id);
+        }
+      }
+
+      db.exec(`
+        CREATE UNIQUE INDEX idx_prs_repo_pr_number ON prs(repo_id, github_pr_number) WHERE github_pr_number IS NOT NULL;
+        CREATE UNIQUE INDEX idx_prs_step_placeholder ON prs(step_id, repo_id) WHERE step_id IS NOT NULL AND github_pr_number IS NULL;
+        CREATE UNIQUE INDEX idx_prs_no_step_placeholder ON prs(repo_id) WHERE step_id IS NULL AND github_pr_number IS NULL;
+      `);
+    },
   },
 ];
 
