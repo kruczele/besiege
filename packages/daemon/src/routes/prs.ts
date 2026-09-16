@@ -146,8 +146,8 @@ export function registerPrRoutes(
     }));
   });
 
-  // Register or upsert a PR for a (step, repo) slot — step is optional, so a
-  // PR can be registered against just a repo with no step association at all.
+  // Register or upsert a PR. step is optional, so a PR can be registered
+  // against just a repo with no step association at all.
   app.post<{
     Body: {
       step_id?: number | null;
@@ -176,24 +176,57 @@ export function registerPrRoutes(
     }
 
     const now = new Date().toISOString();
-    const lifecycle = github_pr_number ? "open" : "not-started";
+    const prNumber = github_pr_number ?? null;
+    const lifecycle = prNumber ? "open" : "not-started";
 
-    db.prepare(
-      `INSERT INTO prs (step_id, repo_id, github_pr_number, github_node_id, lifecycle, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(step_id, repo_id) WHERE step_id IS NOT NULL DO UPDATE SET
-         github_pr_number = COALESCE(excluded.github_pr_number, github_pr_number),
-         github_node_id   = COALESCE(excluded.github_node_id,   github_node_id),
-         lifecycle        = CASE WHEN excluded.lifecycle != 'not-started' THEN excluded.lifecycle ELSE lifecycle END
-       ON CONFLICT(repo_id) WHERE step_id IS NULL DO UPDATE SET
-         github_pr_number = COALESCE(excluded.github_pr_number, github_pr_number),
-         github_node_id   = COALESCE(excluded.github_node_id,   github_node_id),
-         lifecycle        = CASE WHEN excluded.lifecycle != 'not-started' THEN excluded.lifecycle ELSE lifecycle END`,
-    ).run(stepId, repo_id, github_pr_number ?? null, github_node_id ?? null, lifecycle, now);
+    // Identity: once a PR has a GitHub number, (repo_id, github_pr_number) is
+    // that PR forever — step_id is just an updatable field on the row, so
+    // re-registering under a different step moves it instead of forking a
+    // second row (see migration 0035). Without a number (claim_pr/release_pr
+    // call this before a PR necessarily exists), there's nothing to key on
+    // yet, so the (repo_id, step_id) slot is used instead, matching the old
+    // behavior for that case. This is an explicit select-then-write inside
+    // one transaction rather than a declarative ON CONFLICT because
+    // reclaiming a step-scoped placeholder into a numbered PR means matching
+    // a *different* row than the one being inserted, which ON CONFLICT can't
+    // express — safe from races because better-sqlite3 is synchronous and
+    // Node is single-threaded, so no other request's handler can run mid-transaction.
+    let row = db.transaction(() => {
+      let existing = prNumber
+        ? (db
+            .prepare("SELECT * FROM prs WHERE repo_id = ? AND github_pr_number = ?")
+            .get(repo_id, prNumber) as PrRow | undefined)
+        : undefined;
+      if (!existing) {
+        existing = (
+          stepId !== null
+            ? db
+                .prepare("SELECT * FROM prs WHERE repo_id = ? AND step_id = ? AND github_pr_number IS NULL")
+                .get(repo_id, stepId)
+            : db.prepare("SELECT * FROM prs WHERE repo_id = ? AND step_id IS NULL AND github_pr_number IS NULL").get(repo_id)
+        ) as PrRow | undefined;
+      }
 
-    let row = db
-      .prepare("SELECT * FROM prs WHERE step_id IS ? AND repo_id = ?")
-      .get(stepId, repo_id) as PrRow;
+      if (existing) {
+        db.prepare(
+          `UPDATE prs SET
+             step_id = COALESCE(?, step_id),
+             github_pr_number = COALESCE(?, github_pr_number),
+             github_node_id = COALESCE(?, github_node_id),
+             lifecycle = CASE WHEN ? != 'not-started' THEN ? ELSE lifecycle END
+           WHERE id = ?`,
+        ).run(stepId, prNumber, github_node_id ?? null, lifecycle, lifecycle, existing.id);
+        return db.prepare("SELECT * FROM prs WHERE id = ?").get(existing.id) as PrRow;
+      }
+
+      const info = db
+        .prepare(
+          `INSERT INTO prs (step_id, repo_id, github_pr_number, github_node_id, lifecycle, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(stepId, repo_id, prNumber, github_node_id ?? null, lifecycle, now);
+      return db.prepare("SELECT * FROM prs WHERE id = ?").get(info.lastInsertRowid) as PrRow;
+    })();
 
     // register_pr only requires a PR number, not a node id — without one,
     // branch_name/CI/review state can never be filled in by syncPr/

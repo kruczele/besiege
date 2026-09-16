@@ -213,9 +213,9 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
     "/campaigns/:campaignId/steps",
     async (req, reply) => {
       const { name, step_order } = req.body ?? {};
-      if (!name?.trim() || step_order === undefined) {
+      if (!name?.trim()) {
         reply.code(400);
-        return { error: "name and step_order are required" };
+        return { error: "name is required" };
       }
       const campaign = db.prepare("SELECT id FROM campaigns WHERE id = ?").get(req.params.campaignId);
       if (!campaign) {
@@ -223,11 +223,22 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
         return { error: "campaign not found" };
       }
       try {
+        // step_order is computed in the same statement (not read via a
+        // separate SELECT beforehand) when the caller doesn't pin one
+        // explicitly — resolveStepId (mcp.ts) used to GET /steps and compute
+        // nextOrder in JS, which let concurrent register_pr entries creating
+        // different-named steps in the same batch all read the same "next"
+        // value and then race each other's INSERT, 409ing on every entry but
+        // the winner. A subquery inside the INSERT is evaluated atomically —
+        // no other request's handler can interleave mid-statement (better-
+        // sqlite3 is synchronous, Node is single-threaded) — so concurrent
+        // creates now always land on distinct, correct orders.
         const info = db
           .prepare(
-            "INSERT INTO campaign_steps (campaign_id, name, step_order, created_at) VALUES (?, ?, ?, ?)",
+            `INSERT INTO campaign_steps (campaign_id, name, step_order, created_at)
+             VALUES (?, ?, COALESCE(?, (SELECT COALESCE(MAX(step_order), -1) + 1 FROM campaign_steps WHERE campaign_id = ?)), ?)`,
           )
-          .run(req.params.campaignId, name.trim(), step_order, new Date().toISOString());
+          .run(req.params.campaignId, name.trim(), step_order ?? null, req.params.campaignId, new Date().toISOString());
         const row = db
           .prepare("SELECT * FROM campaign_steps WHERE id = ?")
           .get(info.lastInsertRowid) as StepRow;
@@ -253,16 +264,34 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
     },
   );
 
+  // Cascading delete, like the full campaign delete above but scoped to one
+  // step — foreign keys are enforced, so a step with any PRs or task
+  // definitions still under it would otherwise fail with a constraint error
+  // (or, with FK enforcement off, leave orphans). Used by the MCP
+  // delete_step tool as well as the GUI/TUI.
   app.delete<{ Params: { campaignId: string; stepId: string } }>(
     "/campaigns/:campaignId/steps/:stepId",
     async (req, reply) => {
-      const result = db
-        .prepare("DELETE FROM campaign_steps WHERE id = ? AND campaign_id = ?")
-        .run(req.params.stepId, req.params.campaignId);
-      if (result.changes === 0) {
+      const step = db
+        .prepare("SELECT id FROM campaign_steps WHERE id = ? AND campaign_id = ?")
+        .get(req.params.stepId, req.params.campaignId);
+      if (!step) {
         reply.code(404);
         return { error: "not found" };
       }
+      db.transaction(() => {
+        db.prepare(
+          `DELETE FROM pr_pending_tasks WHERE
+             pr_id IN (SELECT id FROM prs WHERE step_id = ?)
+             OR task_definition_id IN (SELECT id FROM task_definitions WHERE step_id = ?)`,
+        ).run(req.params.stepId, req.params.stepId);
+        db.prepare(`DELETE FROM pr_claims WHERE pr_id IN (SELECT id FROM prs WHERE step_id = ?)`).run(
+          req.params.stepId,
+        );
+        db.prepare("DELETE FROM prs WHERE step_id = ?").run(req.params.stepId);
+        db.prepare("DELETE FROM task_definitions WHERE step_id = ?").run(req.params.stepId);
+        db.prepare("DELETE FROM campaign_steps WHERE id = ?").run(req.params.stepId);
+      })();
       reply.code(204);
     },
   );

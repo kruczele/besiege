@@ -564,6 +564,29 @@ export const migrations: Migration[] = [
         WHERE ci_failure_signature_id IS NOT NULL;
     `,
   },
+  {
+    name: "0035_prs_identity_by_pr_number",
+    sql: `
+      -- Keying a PR on (step_id, repo_id) meant every register_pr entry for
+      -- the same repo with no step collided on idx_prs_repo_no_step (unique
+      -- on repo_id alone) and silently overwrote each other down to the last
+      -- entry in a batch. A GitHub PR number is the real, permanent identity
+      -- of a PR within its repo, so that becomes the upsert key instead —
+      -- step_id is now just an updatable field on the row (see routes/prs.ts),
+      -- which also means moving a PR between steps no longer forks a dupe.
+      --
+      -- claim_pr/release_pr still call resolvePrId with no PR number at all
+      -- (a slot can be claimed before a PR exists), so a placeholder row
+      -- (github_pr_number IS NULL) keeps the old (repo_id, step_id) dedup —
+      -- otherwise every repeat claim on the same slot would insert a new row.
+      DROP INDEX idx_prs_step_repo;
+      DROP INDEX idx_prs_repo_no_step;
+
+      CREATE UNIQUE INDEX idx_prs_repo_pr_number ON prs(repo_id, github_pr_number) WHERE github_pr_number IS NOT NULL;
+      CREATE UNIQUE INDEX idx_prs_step_placeholder ON prs(step_id, repo_id) WHERE step_id IS NOT NULL AND github_pr_number IS NULL;
+      CREATE UNIQUE INDEX idx_prs_no_step_placeholder ON prs(repo_id) WHERE step_id IS NULL AND github_pr_number IS NULL;
+    `,
+  },
 ];
 
 // Pre-0031, a split was a binary { dir, ratio, a, b } node (nesting two
