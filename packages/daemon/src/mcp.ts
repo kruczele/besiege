@@ -79,10 +79,13 @@ async function resolveStepId(campaign: string, step: string): Promise<number> {
   const steps = await getJson<CampaignStep[]>(`/campaigns/${encodeURIComponent(campaign)}/steps`);
   const match = steps.find((s) => s.name.toLowerCase() === step.toLowerCase());
   if (match) return match.id;
-  const nextOrder = steps.reduce((max, s) => Math.max(max, s.stepOrder), -1) + 1;
+  // step_order is left for the server to compute atomically (routes/campaigns.ts)
+  // rather than derived from `steps` here — concurrent register_pr entries
+  // creating different-named steps in the same batch would otherwise all
+  // compute the same "next" order from this same GET and race each other's
+  // insert.
   const created = await postJson<CampaignStep>(`/campaigns/${encodeURIComponent(campaign)}/steps`, {
     name: step,
-    step_order: nextOrder,
   });
   return created.id;
 }
@@ -100,8 +103,11 @@ async function resolvePrId(
 ): Promise<number> {
   const repoId = await resolveRepoId(campaign, repo);
   const stepId = step ? await resolveStepId(campaign, step) : null;
-  // Upsert — idempotent per the partial unique indexes on (step_id, repo_id)
-  // / (repo_id) WHERE step_id IS NULL, same as `besiege dispatch` (cli.ts).
+  // Upsert — idempotent per (repo_id, github_pr_number) once a PR number is
+  // known, same as `besiege dispatch` (cli.ts); step_id is an updatable
+  // field on that row, not part of its identity, so registering the same PR
+  // under a different step moves it instead of forking a duplicate. Without
+  // a number yet, (repo_id, step_id) is used instead (see routes/prs.ts).
   // github_pr_number/github_node_id are COALESCEd server-side, so omitting
   // them here never clobbers a value register_pr already set.
   const pr = await postJson<Pr>(
@@ -115,6 +121,22 @@ async function resolvePrId(
     timeoutMs,
   );
   return pr.id;
+}
+
+// Looks up a PR by (repo, githubPrNumber) without auto-creating anything —
+// unlike resolvePrId, unregister_pr has nothing useful to do with a repo or
+// PR that doesn't already exist, so it should report "nothing to remove"
+// rather than create one just to immediately delete it.
+async function findPrId(campaign: string, repo: string, githubPrNumber: number): Promise<number | null> {
+  const repos = await getJson<CampaignRepo[]>(
+    `/campaigns/${encodeURIComponent(campaign)}/repos?name=${encodeURIComponent(repo)}`,
+  );
+  if (repos.length === 0) return null;
+  const prs = await getJson<{ id: number; githubPrNumber: number | null }[]>(
+    `/campaigns/${encodeURIComponent(campaign)}/prs?repo=${encodeURIComponent(repo)}`,
+  );
+  const match = prs.find((p) => p.githubPrNumber === githubPrNumber);
+  return match ? match.id : null;
 }
 
 // Bounded-concurrency map — register_pr entries used to all fire at once via
@@ -301,6 +323,41 @@ const TOOLS = [
     },
   },
   {
+    name: "unregister_pr",
+    description:
+      "Remove a single PR record for (repo, githubPrNumber) from tracking entirely — e.g. a stray " +
+      "registration left under the wrong step, or a placeholder claim_pr created that never got a real PR. " +
+      "This is a hard delete: the PR's pending tasks and any active claim go with it. It's a no-op (not an " +
+      "error) if no matching record exists, so it's safe to retry. Not for the normal merged/closed case — " +
+      "that's a lifecycle change on an existing record, not a removal.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        repo: { type: "string", description: 'GitHub full name, e.g. "org/repo"' },
+        githubPrNumber: { type: "number", description: "The PR number from GitHub, e.g. 42" },
+        campaign: CAMPAIGN_PROPERTY,
+      },
+      required: ["repo", "githubPrNumber"],
+    },
+  },
+  {
+    name: "delete_step",
+    description:
+      "Permanently remove a step from the campaign's pipeline. This cascades: any PRs still registered " +
+      "under the step (and their pending tasks/claims) and any task definitions for it are deleted along with " +
+      "it, not just checked for emptiness. Use it to clean up a step created by mistake, or one whose PRs " +
+      "have all since been moved to a different step via register_pr. It's a no-op (not an error) if no step " +
+      "by that name exists, so it's safe to retry.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        step: { type: "string", description: "Step name within the campaign" },
+        campaign: CAMPAIGN_PROPERTY,
+      },
+      required: ["step"],
+    },
+  },
+  {
     name: "pin_repo",
     description:
       "Pin a repo in the campaign for one-click access from the GUI (a quick-open bar linking straight to " +
@@ -482,6 +539,31 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         );
         const allFailed = outcomes.length > 0 && outcomes.every((o) => o.status === "rejected");
         return { content: [{ type: "text", text: lines.join("\n") }], isError: allFailed };
+      }
+
+      case "unregister_pr": {
+        const campaign = resolveCampaign(a);
+        const { repo, githubPrNumber } = (args ?? {}) as { repo?: string; githubPrNumber?: number };
+        if (!repo || !githubPrNumber) throw new Error("repo and githubPrNumber are required");
+        const prId = await findPrId(campaign, repo, githubPrNumber);
+        if (prId === null) {
+          return { content: [{ type: "text", text: `No PR record found for ${repo} #${githubPrNumber} — nothing to remove.` }] };
+        }
+        await deleteJson(`/prs/${prId}`);
+        return { content: [{ type: "text", text: `Removed PR record for ${repo} #${githubPrNumber} (pr id ${prId}).` }] };
+      }
+
+      case "delete_step": {
+        const campaign = resolveCampaign(a);
+        const { step } = a;
+        if (!step) throw new Error("step is required");
+        const steps = await getJson<CampaignStep[]>(`/campaigns/${encodeURIComponent(campaign)}/steps`);
+        const match = steps.find((s) => s.name.toLowerCase() === step.toLowerCase());
+        if (!match) {
+          return { content: [{ type: "text", text: `No step named '${step}' found — nothing to delete.` }] };
+        }
+        await deleteJson(`/campaigns/${encodeURIComponent(campaign)}/steps/${match.id}`);
+        return { content: [{ type: "text", text: `Deleted step '${step}' (and any PRs/tasks under it).` }] };
       }
 
       case "pin_repo": {
