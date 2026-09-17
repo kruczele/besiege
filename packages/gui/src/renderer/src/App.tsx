@@ -705,9 +705,10 @@ function CampaignsPanel({
                   href={`https://github.com/${r.githubFullName}`}
                   target="_blank"
                   rel="noreferrer"
+                  title={r.githubFullName}
                 >
                   <ExternalLink size={13} />
-                  {r.githubFullName}
+                  {r.githubFullName.split("/").pop()}
                 </a>
                 <button className="pinned-repo-unpin" title="Unpin" onClick={() => toggleRepoPinned(r)}>
                   <PinOff size={13} />
