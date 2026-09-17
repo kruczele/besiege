@@ -155,15 +155,23 @@ body {
   padding: 1.5rem;
 }
 
-h1 {
-  font-size: 1.3rem;
-  margin: 0 0 1rem;
+.sidebar-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.brand-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 0.15rem;
 }
 
 .tabs {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.75rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -187,7 +195,7 @@ h1 {
   font-size: 0.78rem;
   color: var(--text-secondary);
   line-height: 1.4;
-  margin: 0 0 1.25rem;
+  margin: 0;
 }
 
 .panel {
@@ -430,12 +438,59 @@ h1 {
 
 /* ── Campaign grid ── */
 
-.campaign-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
+/* Pinned above .sidebar-content — stays visible regardless of scroll. */
+.campaign-tabs-pinned {
+  flex-shrink: 0;
   margin-bottom: 1rem;
+}
+
+/* Notebook/co-joined tab strip: no gaps, shared borders collapsed, only the
+   outer top corners rounded — reads as a set of tabs on a folder rather
+   than a row of separate pill buttons. */
+.campaign-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.campaign-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 0;
+  color: var(--text-secondary);
+  padding: 0.4rem 0.8rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+}
+
+.campaign-tab + .campaign-tab {
+  margin-left: -1px;
+}
+
+.campaign-tab:first-child {
+  border-top-left-radius: 5px;
+}
+
+.campaign-tab:last-child {
+  border-top-right-radius: 5px;
+}
+
+.campaign-tab:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  z-index: 1;
+}
+
+.campaign-tab.selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  z-index: 2;
 }
 
 .campaign-picker {
