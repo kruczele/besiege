@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  Castle,
   Copy,
   ExternalLink,
   Minus,
@@ -50,6 +51,31 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
   // switching to Army/Campaigns lands on whatever was already selected
   // instead of resetting to the first campaign in the list.
   const [activeCampaignId, setActiveCampaignId] = useState<number | null>(null);
+  // The campaign list itself, lifted here (rather than fetched separately by
+  // CampaignsPanel and LivePanel) so the pinned campaign switcher in the
+  // sidebar header can render once and stay in sync with whichever tab is
+  // acting on it.
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const reloadCampaigns = (selectId?: number) => {
+    window.api.listCampaigns(showArchived).then((res) => {
+      if (!res.ok) return;
+      setCampaigns(res.result);
+      if (selectId !== undefined) {
+        setActiveCampaignId(selectId);
+      } else {
+        // Keep the current selection if it's still in the list; otherwise
+        // (e.g. it was just archived/deleted) fall back to the first one.
+        setActiveCampaignId((cur) =>
+          cur !== null && res.result.some((c) => c.id === cur) ? cur : (res.result[0]?.id ?? null),
+        );
+      }
+    });
+  };
+  useEffect(() => {
+    reloadCampaigns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArchived]);
   // Set by "Jump to agent" (Inbox, Army tab) — see TerminalsMain's
   // focusRequest prop for how the terminal area resolves this into an
   // actual tab/pane selection once that campaign's grid has loaded.
@@ -96,7 +122,10 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
       {chrome && <TitleBar />}
       <div className="shell">
         <aside className="sidebar">
-          <h1>Besiege</h1>
+          <div className="sidebar-header">
+            <Castle className="brand-icon" size={22} aria-label="Besiege" />
+            <p className="tab-helptext">{TAB_HELPTEXT[tab]}</p>
+          </div>
           <nav className="tabs">
             {(["campaigns", "live", "rules"] as Tab[]).map((t) => (
               <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
@@ -104,18 +133,25 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
               </button>
             ))}
           </nav>
-          <p className="tab-helptext">{TAB_HELPTEXT[tab]}</p>
+          {/* Pinned above .sidebar-content (not inside it) so switching
+              campaigns never requires scrolling back up first. */}
+          {tab !== "rules" && campaigns.length > 0 && (
+            <div className="campaign-tabs-pinned">
+              <CampaignPicker campaigns={campaigns} selectedId={activeCampaignId} onSelect={setActiveCampaignId} />
+            </div>
+          )}
           <div className="sidebar-content">
             {tab === "campaigns" && (
-              <CampaignsPanel activeCampaignId={activeCampaignId} onSelectCampaign={setActiveCampaignId} />
+              <CampaignsPanel
+                activeCampaignId={activeCampaignId}
+                campaigns={campaigns}
+                showArchived={showArchived}
+                setShowArchived={setShowArchived}
+                reloadCampaigns={reloadCampaigns}
+              />
             )}
             {tab === "live" && (
-              <LivePanel
-                activeCampaignId={activeCampaignId}
-                onSelectCampaign={setActiveCampaignId}
-                onJump={jumpToSession}
-                titles={titles}
-              />
+              <LivePanel activeCampaignId={activeCampaignId} onJump={jumpToSession} titles={titles} />
             )}
             {tab === "rules" && <RulesPanel />}
           </div>
@@ -420,9 +456,9 @@ function PrBoard({
   );
 }
 
-// Button-row campaign switcher shared by CampaignsPanel and LivePanel —
-// there are only ever a handful of campaigns, so a pill row reads faster
-// than a dropdown and matches the rest of the "buttons over dropdowns" pass.
+// Notebook-tab campaign switcher, pinned above the sidebar's scrollable
+// content (see App's render) so it stays visible across scroll position and
+// is shared by whichever tab is acting on the selected campaign.
 function CampaignPicker({
   campaigns,
   selectedId,
@@ -433,11 +469,11 @@ function CampaignPicker({
   onSelect: (id: number) => void;
 }) {
   return (
-    <div className="campaign-picker">
+    <div className="campaign-tabs">
       {campaigns.map((c) => (
         <button
           key={c.id}
-          className={`campaign-picker-btn ${selectedId === c.id ? "selected" : ""}`}
+          className={`campaign-tab ${selectedId === c.id ? "selected" : ""}`}
           onClick={() => onSelect(c.id)}
         >
           {c.name}
@@ -493,12 +529,17 @@ function NewCampaignForm({ onCreated }: { onCreated: (c: Campaign) => void }) {
 
 function CampaignsPanel({
   activeCampaignId,
-  onSelectCampaign,
+  campaigns,
+  showArchived,
+  setShowArchived,
+  reloadCampaigns,
 }: {
   activeCampaignId: number | null;
-  onSelectCampaign: (id: number) => void;
+  campaigns: Campaign[];
+  showArchived: boolean;
+  setShowArchived: (v: boolean) => void;
+  reloadCampaigns: (selectId?: number) => void;
 }) {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const selectedId = activeCampaignId;
   const [steps, setSteps] = useState<CampaignStep[]>([]);
   const [prs, setPrs] = useState<PrGridRow[]>([]);
@@ -506,24 +547,8 @@ function CampaignsPanel({
   const [syncing, setSyncing] = useState(false);
   const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
-  const reloadCampaigns = (selectId?: number) => {
-    window.api.listCampaigns(showArchived).then((res) => {
-      if (res.ok) {
-        setCampaigns(res.result);
-        if (selectId !== undefined) onSelectCampaign(selectId);
-        else if (res.result.length > 0 && selectedId === null) onSelectCampaign(res.result[0].id);
-      }
-    });
-  };
-
-  useEffect(() => {
-    reloadCampaigns();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showArchived]);
 
   const handleCreated = (c: Campaign) => {
     setShowNewForm(false);
@@ -587,23 +612,15 @@ function CampaignsPanel({
 
   const handleArchiveToggle = async () => {
     if (!selectedCampaign) return;
-    const wasArchiving = !selectedCampaign.archivedAt;
     setArchiving(true);
     await (selectedCampaign.archivedAt
       ? window.api.unarchiveCampaign(selectedCampaign.id)
       : window.api.archiveCampaign(selectedCampaign.id));
     setArchiving(false);
     // Archiving the selected campaign (with the archived list hidden) drops
-    // it out of the switcher entirely — move selection to whatever's left
-    // rather than leaving the board pointed at a campaign no longer listed.
-    if (wasArchiving && !showArchived) {
-      const res = await window.api.listCampaigns(false);
-      if (res.ok) {
-        setCampaigns(res.result);
-        if (res.result[0]) onSelectCampaign(res.result[0].id);
-        return;
-      }
-    }
+    // it out of the switcher entirely — reloadCampaigns falls back to
+    // whatever's left rather than leaving the board pointed at a campaign no
+    // longer listed.
     reloadCampaigns();
   };
 
@@ -622,11 +639,7 @@ function CampaignsPanel({
     const res = await window.api.deleteCampaign(selectedCampaign.id);
     setDeleting(false);
     if (!res.ok) return;
-    const listRes = await window.api.listCampaigns(showArchived);
-    if (listRes.ok) {
-      setCampaigns(listRes.result);
-      if (listRes.result[0]) onSelectCampaign(listRes.result[0].id);
-    }
+    reloadCampaigns();
   };
 
   if (campaigns.length === 0) {
@@ -644,13 +657,10 @@ function CampaignsPanel({
 
   return (
     <div className="panel">
-      <div className="campaign-toolbar">
-        <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={onSelectCampaign} />
-        <label className="show-archived-toggle">
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-          Show archived
-        </label>
-      </div>
+      <label className="show-archived-toggle">
+        <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+        Show archived
+      </label>
       <div className="campaign-actions-row">
         <button title={syncing ? "Syncing…" : "Sync GitHub"} onClick={handleSync} disabled={syncing}>
           <RefreshCw size={15} />
@@ -985,34 +995,16 @@ function NotificationCard({
 // completely now, so this is just the one list.
 function LivePanel({
   activeCampaignId,
-  onSelectCampaign,
   onJump,
   titles,
 }: {
   activeCampaignId: number | null;
-  onSelectCampaign: (id: number) => void;
   onJump: (campaignId: number, terminalId: number) => void;
   titles: Record<number, string>;
 }) {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const selectedId = activeCampaignId;
   const [claims, setClaims] = useState<ActiveClaim[]>([]);
   const [runningAgents, setRunningAgents] = useState<TerminalSession[]>([]);
-
-  // Shares App's one notion of "current campaign" with the Campaigns tab
-  // (same pattern as CampaignsPanel's reloadCampaigns) — only falls back to
-  // the first campaign when nothing is selected yet, so switching to this
-  // tab lands on whichever campaign was already active rather than always
-  // resetting to the top of the list.
-  useEffect(() => {
-    window.api.listCampaigns().then((res) => {
-      if (res.ok && res.result.length > 0) {
-        setCampaigns(res.result);
-        if (selectedId === null) onSelectCampaign(res.result[0].id);
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (selectedId === null) return;
@@ -1055,11 +1047,6 @@ function LivePanel({
 
   return (
     <div className="panel">
-      {campaigns.length > 1 && (
-        <div className="campaign-toolbar">
-          <CampaignPicker campaigns={campaigns} selectedId={selectedId} onSelect={onSelectCampaign} />
-        </div>
-      )}
       {claims.length === 0 && runningAgents.length === 0 ? (
         <p className="empty-hint">No agents running.</p>
       ) : (
