@@ -264,6 +264,35 @@ export function registerCampaignRoutes(app: FastifyInstance, db: Database.Databa
     },
   );
 
+  app.patch<{ Params: { campaignId: string; stepId: string }; Body: { name?: string } }>(
+    "/campaigns/:campaignId/steps/:stepId",
+    async (req, reply) => {
+      const { name } = req.body ?? {};
+      if (!name?.trim()) {
+        reply.code(400);
+        return { error: "name is required" };
+      }
+      const step = db
+        .prepare("SELECT id FROM campaign_steps WHERE id = ? AND campaign_id = ?")
+        .get(req.params.stepId, req.params.campaignId);
+      if (!step) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      try {
+        db.prepare("UPDATE campaign_steps SET name = ? WHERE id = ?").run(name.trim(), req.params.stepId);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.message.includes("UNIQUE")) {
+          reply.code(409);
+          return { error: "a step with that name already exists" };
+        }
+        throw err;
+      }
+      const row = db.prepare("SELECT * FROM campaign_steps WHERE id = ?").get(req.params.stepId) as StepRow;
+      return toStep(row);
+    },
+  );
+
   // Cascading delete, like the full campaign delete above but scoped to one
   // step — foreign keys are enforced, so a step with any PRs or task
   // definitions still under it would otherwise fail with a constraint error

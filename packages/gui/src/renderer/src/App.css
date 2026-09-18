@@ -518,6 +518,51 @@ body {
   color: var(--text);
 }
 
+.campaign-picker-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.campaign-picker-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.step-icon-btn {
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-disabled);
+  padding: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.step-icon-btn:hover {
+  color: var(--text);
+  background: var(--surface-active);
+}
+
+.step-edit-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.step-edit-form input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 0.25rem 0.6rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+
 /* Separate row for actions on the selected campaign (Sync/Archive/Delete/
    New) — kept out of .campaign-toolbar so picking a campaign and acting on
    one read as two distinct controls rather than one long button row. */

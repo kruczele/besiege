@@ -8,10 +8,12 @@ import {
   createCampaign,
   createConfigRule,
   createLayout,
+  createStep,
   createTerminal,
   deleteCampaign,
   deleteConfigRule,
   deleteLayout,
+  deleteStep,
   deleteTerminal,
   fetchAgentAdapters,
   fetchCampaignClaims,
@@ -36,6 +38,7 @@ import {
   updateCampaign,
   updateConfigRule,
   updateLayout,
+  updateStep,
   updateTask,
   deleteTask,
 } from "./daemon-client.js";
@@ -159,6 +162,13 @@ daemonHandle("notifications:list", (unacknowledgedOnly: boolean) =>
 daemonHandle("notifications:ack", (id: number) => acknowledgeNotification(id));
 daemonHandle("campaigns:list", (includeArchived?: boolean) => fetchCampaigns(includeArchived));
 daemonHandle("campaigns:steps", (campaignId: number) => fetchSteps(campaignId));
+daemonHandle("steps:create", (campaignId: number, name: string, stepOrder: number | undefined) =>
+  createStep(campaignId, name, stepOrder),
+);
+daemonHandle("steps:update", (campaignId: number, stepId: number, name: string) =>
+  updateStep(campaignId, stepId, name),
+);
+daemonHandle("steps:delete", (campaignId: number, stepId: number) => deleteStep(campaignId, stepId));
 daemonHandle("campaigns:prs", (campaignId: number, needsMe: boolean) =>
   fetchCampaignPrs(campaignId, needsMe ? "needs-me" : undefined),
 );

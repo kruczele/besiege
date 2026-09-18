@@ -58,6 +58,12 @@ export const deleteCampaign = (id: number) => callDaemon<void>("DELETE", `/campa
 
 export const fetchSteps = (campaignId: number) =>
   callDaemon<CampaignStep[]>("GET", `/campaigns/${campaignId}/steps`);
+export const createStep = (campaignId: number, name: string, stepOrder?: number) =>
+  callDaemon<CampaignStep>("POST", `/campaigns/${campaignId}/steps`, { name, step_order: stepOrder });
+export const updateStep = (campaignId: number, stepId: number, name: string) =>
+  callDaemon<CampaignStep>("PATCH", `/campaigns/${campaignId}/steps/${stepId}`, { name });
+export const deleteStep = (campaignId: number, stepId: number) =>
+  callDaemon<void>("DELETE", `/campaigns/${campaignId}/steps/${stepId}`);
 
 export const fetchTasks = (campaignId: number, stepId: number) =>
   callDaemon<TaskDefinition[]>("GET", `/campaigns/${campaignId}/steps/${stepId}/tasks`);
