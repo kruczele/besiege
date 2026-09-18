@@ -124,7 +124,7 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
       <div className="shell">
         <aside className="sidebar">
           <div className="sidebar-header">
-            <img src={favicon} className="brand-icon" width={22} height={22} alt="Besiege" />
+            <img src={favicon} className="brand-icon" alt="Besiege" />
             <p className="tab-helptext">{TAB_HELPTEXT[tab]}</p>
           </div>
           <nav className="tabs">
