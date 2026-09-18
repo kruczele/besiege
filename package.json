@@ -1,6 +1,7 @@
 {
   "name": "besiege-ai",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@11.1.1",
   "scripts": {
     "dev": "pnpm --parallel --filter daemon --filter gui dev",
