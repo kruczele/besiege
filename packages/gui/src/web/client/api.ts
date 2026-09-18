@@ -79,6 +79,9 @@ export const webApi: Api = {
 
   listCampaigns: (includeArchived) => wrap(() => daemon.fetchCampaigns(includeArchived)),
   listSteps: (campaignId) => wrap(() => daemon.fetchSteps(campaignId)),
+  createStep: (campaignId, name, stepOrder) => wrap(() => daemon.createStep(campaignId, name, stepOrder)),
+  updateStep: (campaignId, stepId, name) => wrap(() => daemon.updateStep(campaignId, stepId, name)),
+  deleteStep: (campaignId, stepId) => wrap(() => daemon.deleteStep(campaignId, stepId)),
   listCampaignPrs: (campaignId, needsMe) =>
     wrap(() => daemon.fetchCampaignPrs(campaignId, needsMe ? "needs-me" : undefined)),
   deletePr: (id) => wrap(() => daemon.deletePr(id)),

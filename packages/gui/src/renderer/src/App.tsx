@@ -5,6 +5,7 @@ import {
   Copy,
   ExternalLink,
   Minus,
+  Pencil,
   PinOff,
   Plus,
   RefreshCw,
@@ -728,7 +729,7 @@ function CampaignsPanel({
         />
       )}
 
-      {selectedId !== null && <TasksPanel campaignId={selectedId} steps={steps} />}
+      {selectedId !== null && <TasksPanel campaignId={selectedId} steps={steps} onStepsChange={setSteps} />}
     </div>
   );
 }
@@ -736,7 +737,15 @@ function CampaignsPanel({
 // Human-authored task definitions per step — instructions applied to every PR
 // in that step (agents can also self-serve this via the create_task MCP
 // tool; this is the same underlying route, just from the GUI side).
-function TasksPanel({ campaignId, steps }: { campaignId: number; steps: CampaignStep[] }) {
+function TasksPanel({
+  campaignId,
+  steps,
+  onStepsChange,
+}: {
+  campaignId: number;
+  steps: CampaignStep[];
+  onStepsChange: (steps: CampaignStep[]) => void;
+}) {
   const [selectedStepId, setSelectedStepId] = useState<number | null>(null);
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -747,9 +756,70 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
   const [editName, setEditName] = useState("");
   const [editContext, setEditContext] = useState("");
 
+  const [stepError, setStepError] = useState<string | null>(null);
+  const [showStepForm, setShowStepForm] = useState(false);
+  const [newStepName, setNewStepName] = useState("");
+  const [editingStepId, setEditingStepId] = useState<number | null>(null);
+  const [editStepName, setEditStepName] = useState("");
+
   useEffect(() => {
     setSelectedStepId((cur) => (cur !== null && steps.some((s) => s.id === cur) ? cur : (steps[0]?.id ?? null)));
   }, [steps]);
+
+  const reloadSteps = async () => {
+    const res = await window.api.listSteps(campaignId);
+    if (res.ok) onStepsChange(res.result);
+  };
+
+  const addStep = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStepError(null);
+    const res = await window.api.createStep(campaignId, newStepName);
+    if (!res.ok) {
+      setStepError(res.error);
+      return;
+    }
+    setNewStepName("");
+    setShowStepForm(false);
+    reloadSteps();
+  };
+
+  const startEditStep = (step: CampaignStep) => {
+    setEditingStepId(step.id);
+    setEditStepName(step.name);
+  };
+
+  const cancelEditStep = () => setEditingStepId(null);
+
+  const saveEditStep = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingStepId === null) return;
+    setStepError(null);
+    const res = await window.api.updateStep(campaignId, editingStepId, editStepName);
+    if (!res.ok) {
+      setStepError(res.error);
+      return;
+    }
+    setEditingStepId(null);
+    reloadSteps();
+  };
+
+  const removeStep = async (step: CampaignStep) => {
+    if (
+      !window.confirm(
+        `Permanently delete step "${step.name}" and everything under it (tasks, PRs, claims)? This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setStepError(null);
+    const res = await window.api.deleteStep(campaignId, step.id);
+    if (!res.ok) {
+      setStepError(res.error);
+      return;
+    }
+    reloadSteps();
+  };
 
   const reload = async (stepId: number) => {
     const res = await window.api.listTasks(campaignId, stepId);
@@ -814,89 +884,147 @@ function TasksPanel({ campaignId, steps }: { campaignId: number; steps: Campaign
     reload(selectedStepId);
   };
 
-  if (steps.length === 0) return null;
-
   return (
     <div className="tasks-panel">
-      <h2>Tasks</h2>
+      <h2>Steps</h2>
       <div className="campaign-picker">
-        {steps.map((s) => (
-          <button
-            key={s.id}
-            className={`campaign-picker-btn ${selectedStepId === s.id ? "selected" : ""}`}
-            onClick={() => setSelectedStepId(s.id)}
-          >
-            {s.name}
-          </button>
-        ))}
-      </div>
-
-      {error && <p className="status status-down">{error}</p>}
-
-      <ul className="rule-list">
-        {tasks.length === 0 && <span className="empty-hint">No tasks for this step yet.</span>}
-        {tasks.map((t) =>
-          editingId === t.id ? (
-            <li key={t.id} className="rule-item">
-              <form className="rule-edit-form" onSubmit={saveEdit}>
-                <div className="rule-item-row">
-                  <input value={editName} onChange={(e) => setEditName(e.target.value)} />
-                  <div className="rule-item-actions">
-                    <button type="submit">Save</button>
-                    <button type="button" onClick={cancelEdit}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  className="rule-item-context rule-edit-context"
-                  value={editContext}
-                  onChange={(e) => setEditContext(e.target.value)}
-                />
-              </form>
-            </li>
+        {steps.map((s) =>
+          editingStepId === s.id ? (
+            <form key={s.id} className="step-edit-form" onSubmit={saveEditStep}>
+              <input
+                autoFocus
+                value={editStepName}
+                onChange={(e) => setEditStepName(e.target.value)}
+              />
+              <button type="submit" title="Save" className="step-icon-btn">
+                Save
+              </button>
+              <button type="button" title="Cancel" className="step-icon-btn" onClick={cancelEditStep}>
+                Cancel
+              </button>
+            </form>
           ) : (
-            <li key={t.id} className="rule-item">
-              <div className="rule-item-row">
-                <code>{t.name}</code>
-                <div className="rule-item-actions">
-                  <button onClick={() => startEdit(t)}>Edit</button>
-                  <button onClick={() => remove(t.id)}>Delete</button>
-                  <button onClick={() => retire(t.id)}>Retire</button>
-                </div>
-              </div>
-              <span className="rule-item-context">{t.context}</span>
-            </li>
+            <div key={s.id} className="campaign-picker-pill">
+              <button
+                className={`campaign-picker-btn ${selectedStepId === s.id ? "selected" : ""}`}
+                onClick={() => setSelectedStepId(s.id)}
+              >
+                {s.name}
+              </button>
+              <button className="step-icon-btn" title="Rename step" onClick={() => startEditStep(s)}>
+                <Pencil size={12} />
+              </button>
+              <button className="step-icon-btn" title="Delete step" onClick={() => removeStep(s)}>
+                <Trash2 size={12} />
+              </button>
+            </div>
           ),
         )}
-      </ul>
-
-      {showForm ? (
-        <form className="rule-form" onSubmit={submit}>
-          <input autoFocus placeholder="task name" value={name} onChange={(e) => setName(e.target.value)} />
-          <textarea
-            placeholder="instructions to apply to every PR in this step"
-            value={context}
-            onChange={(e) => setContext(e.target.value)}
-          />
-          <div className="rule-item-actions">
-            <button type="submit" disabled={!name.trim() || !context.trim()}>
-              Add task
+        {showStepForm ? (
+          <form className="step-edit-form" onSubmit={addStep}>
+            <input
+              autoFocus
+              placeholder="step name"
+              value={newStepName}
+              onChange={(e) => setNewStepName(e.target.value)}
+            />
+            <button type="submit" className="step-icon-btn" disabled={!newStepName.trim()}>
+              Add
             </button>
             <button
               type="button"
+              className="step-icon-btn"
               onClick={() => {
-                setShowForm(false);
-                setName("");
-                setContext("");
+                setShowStepForm(false);
+                setNewStepName("");
               }}
             >
               Cancel
             </button>
-          </div>
-        </form>
-      ) : (
-        <button onClick={() => setShowForm(true)}>Add task</button>
+          </form>
+        ) : (
+          <button className="campaign-picker-btn campaign-picker-add" title="Add step" onClick={() => setShowStepForm(true)}>
+            <Plus size={13} />
+          </button>
+        )}
+      </div>
+
+      {stepError && <p className="status status-down">{stepError}</p>}
+
+      {steps.length === 0 && <span className="empty-hint">No steps yet — add one to start creating tasks.</span>}
+
+      {steps.length > 0 && (
+        <>
+          <h2>Tasks</h2>
+
+          {error && <p className="status status-down">{error}</p>}
+
+          <ul className="rule-list">
+            {tasks.length === 0 && <span className="empty-hint">No tasks for this step yet.</span>}
+            {tasks.map((t) =>
+              editingId === t.id ? (
+                <li key={t.id} className="rule-item">
+                  <form className="rule-edit-form" onSubmit={saveEdit}>
+                    <div className="rule-item-row">
+                      <input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                      <div className="rule-item-actions">
+                        <button type="submit">Save</button>
+                        <button type="button" onClick={cancelEdit}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                    <textarea
+                      className="rule-item-context rule-edit-context"
+                      value={editContext}
+                      onChange={(e) => setEditContext(e.target.value)}
+                    />
+                  </form>
+                </li>
+              ) : (
+                <li key={t.id} className="rule-item">
+                  <div className="rule-item-row">
+                    <code>{t.name}</code>
+                    <div className="rule-item-actions">
+                      <button onClick={() => startEdit(t)}>Edit</button>
+                      <button onClick={() => remove(t.id)}>Delete</button>
+                      <button onClick={() => retire(t.id)}>Retire</button>
+                    </div>
+                  </div>
+                  <span className="rule-item-context">{t.context}</span>
+                </li>
+              ),
+            )}
+          </ul>
+
+          {showForm ? (
+            <form className="rule-form" onSubmit={submit}>
+              <input autoFocus placeholder="task name" value={name} onChange={(e) => setName(e.target.value)} />
+              <textarea
+                placeholder="instructions to apply to every PR in this step"
+                value={context}
+                onChange={(e) => setContext(e.target.value)}
+              />
+              <div className="rule-item-actions">
+                <button type="submit" disabled={!name.trim() || !context.trim()}>
+                  Add task
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForm(false);
+                    setName("");
+                    setContext("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button onClick={() => setShowForm(true)}>Add task</button>
+          )}
+        </>
       )}
     </div>
   );

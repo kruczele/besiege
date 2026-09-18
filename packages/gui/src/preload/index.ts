@@ -40,6 +40,12 @@ const api = {
     ipcRenderer.invoke("campaigns:list", includeArchived),
   listSteps: (campaignId: number): Promise<DaemonResult<CampaignStep[]>> =>
     ipcRenderer.invoke("campaigns:steps", campaignId),
+  createStep: (campaignId: number, name: string, stepOrder?: number): Promise<DaemonResult<CampaignStep>> =>
+    ipcRenderer.invoke("steps:create", campaignId, name, stepOrder),
+  updateStep: (campaignId: number, stepId: number, name: string): Promise<DaemonResult<CampaignStep>> =>
+    ipcRenderer.invoke("steps:update", campaignId, stepId, name),
+  deleteStep: (campaignId: number, stepId: number): Promise<DaemonResult<void>> =>
+    ipcRenderer.invoke("steps:delete", campaignId, stepId),
   listCampaignPrs: (campaignId: number, needsMe: boolean): Promise<DaemonResult<PrGridRow[]>> =>
     ipcRenderer.invoke("campaigns:prs", campaignId, needsMe),
   deletePr: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("prs:delete", id),
