@@ -1,14 +1,53 @@
 # Besiege
 
-A daemon-backed console for running coding agents across multi-repo campaigns — config injection, campaign memory, and PR tracking at fleet scale.
+Besiege is a command center for coding agents — terminals, agent sessions, notes, repos, and pull requests, all grouped around the work you're actually doing, with one place to see what needs your attention instead of hunting across terminals and GitHub.
 
 See [`docs/besiege-spec.md`](docs/besiege-spec.md) for the full requirements and architecture spec.
 
-## What it is
+## The model: campaign → tabs → panels
 
-Org-wide rollouts across hundreds of repos produce thousands of PRs. GitHub's PR list and Projects views are one-dimensional and choke at this scale. Besiege's primary view is a **campaign × step × repo matrix** — the shape GitHub can't render.
+A **campaign** is a container for everything belonging to one piece of work — one migration across 300 repos, one feature spanning five services, a dozen agents working in parallel. It holds:
 
-On top of that: running many concurrent Claude Code sessions in terminals means config preferences live in ad-hoc CLAUDE.md edits, nothing carries forward what a prior session learned about a recurring failure, and knowing which of N terminals just asked a question requires tab-hopping. Besiege fixes all of that from a single place.
+- **Tabs**, each a saved grid layout of **panels**.
+- A panel is either an **agent session**, a **terminal session**, or a **note** — for context you're dissecting and don't want to keep scrolling back to find.
+- **Pinned repos**, and a **PR board** that tracks every pull request touching them.
+
+```
+Campaign
+├─ Tab: "backend"
+│   ├─ Panel: agent session (packages/api)
+│   ├─ Panel: terminal
+│   └─ Panel: note — rollout checklist
+├─ Tab: "frontend"
+│   └─ Panel: agent session (packages/web)
+├─ Pinned repos
+└─ PR board (branch × CI × review)
+```
+
+Each session is hardwired to its panel — restart your machine, and everything is exactly where you left it, one click from resumed. No re-finding which terminal was doing what.
+
+## Why: the actual problem
+
+Running many agents at once, across many repos, breaks down in a few specific ways:
+
+- **Work has no home.** A terminal tab is not a unit of work — it dies with the window and tells you nothing about what it was for.
+- **Context doesn't survive.** Config and preferences live in ad-hoc CLAUDE.md edits; nothing carries forward what a prior session already learned about a recurring failure.
+- **Attention is unscoped.** Knowing which of N terminals just asked a question means tab-hopping; knowing which of your PRs need you means opening GitHub over and over.
+
+Besiege isn't really managing the agents — it's managing *your* context and attention while the agents manage the code.
+
+### The scale case
+
+This started from an org-wide rollout across ~300 repos producing ~1,200 PRs. GitHub's PR list and Projects views are one-dimensional and choke at that scale — there's no view shaped like the actual work. Besiege's PR board groups by branch first (a campaign usually pushes the same branch name everywhere), then by CI and review status, so "this branch is still failing CI somewhere" is one glance instead of a hundred tabs. It stays in sync with GitHub on a schedule via batched GraphQL, so both you and your agents read from one fast, already-fresh place instead of each agent hitting the GitHub API on its own — which, at this scale, is not just slower, it's a different order of magnitude slower.
+
+## Key features
+
+- **Campaigns** — tabs of panels (agent sessions, terminals, notes), pinned repos, and a PR board, all scoped to one piece of work and recoverable after a restart.
+- **Edicts** — your own path-scoped instructions for how agents should behave under a directory glob, injected into each session via the `SessionStart` hook. They travel with you personally and never touch a shared `CLAUDE.md`/`AGENTS.md`, so they can't collide with a teammate's session in the same repo.
+- **PR board** — every PR touching a pinned repo, grouped by branch, then CI and review state. Backed by batched GitHub GraphQL polling, rate-limit-safe at 1,200+ PRs.
+- **Inbox** — agent sessions that are blocked, waiting, or done relay into one board instead of requiring you to notice a specific terminal.
+- **Campaign memory** — per-step playbooks and failure-signature records carried into subsequent sessions.
+- **MCP interface** — `pr_state`, `pending_tasks`, `failure_pattern`, and claim tools exposed to agents as a fast-path alternative to raw `gh` calls — the same question that takes three round-trips through the GitHub API is one call here.
 
 ## Architecture
 
@@ -77,14 +116,6 @@ pnpm dev:webserver   # serves it + proxies to the daemon, on http://127.0.0.1:45
 The web server binds to `127.0.0.1` only and has **no authentication** — it grants shell/agent command execution to whoever can reach it, so it must never be exposed beyond localhost (e.g. don't port-forward it, don't bind it to `0.0.0.0`).
 
 Wire Claude Code hooks from [`packages/daemon/README.md`](packages/daemon/README.md) to enable config injection and the notification inbox.
-
-## Key features
-
-- **Config injection** — per-session context rules resolved from the daemon and injected via `SessionStart` hook `additionalContext`. Never written to CLAUDE.md, so concurrent sessions sharing a cwd can't collide.
-- **PR tracking** — campaign × step × repo matrix with lifecycle, CI, review state, and claim status. Backed by batched GitHub GraphQL polling (rate-limit safe at 1,200+ PRs).
-- **Attention inbox** — `Notification` hook relays blocked/waiting sessions into a single board instead of requiring you to notice a specific terminal.
-- **Campaign memory** — per-step playbooks and failure-signature records carried into subsequent sessions.
-- **MCP interface** — `pr_state`, `pending_tasks`, `failure_pattern` tools exposed to agents as a fast-path alternative to raw `gh` calls.
 
 ## Status
 
