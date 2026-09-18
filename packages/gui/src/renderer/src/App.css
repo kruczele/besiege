@@ -163,9 +163,12 @@ body {
 }
 
 .brand-icon {
+  /* Matches .tab-helptext's two-line height (0.78rem font-size * 1.4
+     line-height * 2 lines) so the logo reads as tall as its caption. */
+  width: 2.184rem;
+  height: 2.184rem;
   color: var(--accent);
   flex-shrink: 0;
-  margin-top: 0.15rem;
 }
 
 .tabs {
