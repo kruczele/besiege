@@ -4,3 +4,7 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
   electron: true
+# Refuse to resolve any package version published less than 7 days ago —
+# a window for a malicious/compromised release to get flagged and pulled
+# before it can land here. In minutes, since that's the unit pnpm expects.
+minimumReleaseAge: 10080
