@@ -44,6 +44,7 @@ machine's Unix socket.
 |---|---|
 | [`packages/daemon`](packages/daemon) | HTTP API over a Unix socket, SQLite state, Claude Code hooks, GitHub sync |
 | `packages/gui` | Electron app for Ubuntu — campaign grid, inbox, config UI. Also ships a browser-based alternative (`src/web`) that reuses the same UI over HTTP/WebSocket instead of Electron IPC. |
+| `packages/tui` | Terminal UI — **early-stage spike**, not wired into the root `pnpm dev` scripts. See [Status](#status). |
 
 ## Getting started
 
@@ -84,3 +85,16 @@ Wire Claude Code hooks from [`packages/daemon/README.md`](packages/daemon/README
 - **Attention inbox** — `Notification` hook relays blocked/waiting sessions into a single board instead of requiring you to notice a specific terminal.
 - **Campaign memory** — per-step playbooks and failure-signature records carried into subsequent sessions.
 - **MCP interface** — `pr_state`, `pending_tasks`, `failure_pattern` tools exposed to agents as a fast-path alternative to raw `gh` calls.
+
+## Status
+
+This is a working daemon + GUI, actively evolving — not a finished product. Some of what the spec describes isn't built yet, and a few things that are built are intentionally provisional. Called out explicitly rather than left for you to discover:
+
+- **No campaign closeout sweep.** A task added to a step after some of its PRs already merged only becomes `pending` on those PRs opportunistically — if the PR never gets touched again for an unrelated reason, that pending task just sits there forever. The scheduled sweep needed to actually guarantee completion (see [`docs/besiege-spec.md`](docs/besiege-spec.md#6-pr-tracking)) doesn't exist yet.
+- **CI failure → memory linkage is half-wired.** Failure-signature records work fine on their own (create/lookup via the `failure_pattern` MCP tool), but the PR record's `ci_failure_signature_id` column — meant to point a failing PR at the matching signature automatically — isn't set by any code path yet. The two systems don't talk to each other yet.
+- **Claims are advisory, not enforced.** Nothing stops a second agent from being dispatched to a PR someone else already claimed. Deliberate for now (dispatch is human-initiated), but worth knowing before you assume it's a safety net.
+- **TUI (`packages/tui`) is an early-stage spike**, not at "full functional parity" with the GUI the spec calls for, and not wired into the root `pnpm dev`/`pnpm dev:*` scripts. Its own code notes that PTY pane full-screen rendering hasn't actually been verified against a live terminal yet.
+- **Antigravity (`agy`) hook support was reverse-engineered** from the installed binary, not an official schema — treat it as a first pass likely to need correction, not a confirmed contract. Details and specific unknowns in [`packages/daemon/README.md`](packages/daemon/README.md#wiring-antigravity-agy-hooks).
+- **GUI/TUI update model is still undecided** — push from the daemon vs. each client polling on an interval. Currently polling; not settled as the long-term answer.
+
+If something looks unfinished, check [`docs/besiege-spec.md`](docs/besiege-spec.md)'s "Open questions" section first — several of these are known and deliberate, not oversights.
