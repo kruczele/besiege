@@ -98,3 +98,4 @@ This is a working daemon + GUI, actively evolving — not a finished product. So
 - **GUI/TUI update model is still undecided** — push from the daemon vs. each client polling on an interval. Currently polling; not settled as the long-term answer.
 
 If something looks unfinished, check [`docs/besiege-spec.md`](docs/besiege-spec.md)'s "Open questions" section first — several of these are known and deliberate, not oversights.
+
