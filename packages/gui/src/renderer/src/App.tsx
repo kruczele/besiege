@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
-  Castle,
   Copy,
   ExternalLink,
   Minus,
@@ -27,6 +26,7 @@ import type {
   TerminalSession,
 } from "../../shared/types.js";
 import { TerminalsMain } from "./Terminals.js";
+import favicon from "../../web/client/public/favicon.png";
 
 const POLL_FAST = 3000;
 const POLL_GRID = 5000;
@@ -123,7 +123,7 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
       <div className="shell">
         <aside className="sidebar">
           <div className="sidebar-header">
-            <Castle className="brand-icon" size={22} aria-label="Besiege" />
+            <img src={favicon} className="brand-icon" width={22} height={22} alt="Besiege" />
             <p className="tab-helptext">{TAB_HELPTEXT[tab]}</p>
           </div>
           <nav className="tabs">
