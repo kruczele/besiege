@@ -92,30 +92,48 @@ async function graphqlBatch(
   nodeIds: string[],
   token: string,
 ): Promise<Map<string, GitHubPrState>> {
-  const BATCH_SIZE = 100;
+  // Kept well under GitHub's alias-batch cost ceiling: each aliased node here
+  // also pulls a nested commits→statusCheckRollup→contexts tree, so a batch
+  // of 100 of these is cost-heavy enough to occasionally get rejected by
+  // GitHub outright. When that happened at BATCH_SIZE=100, one failing batch
+  // used to throw and take every other batch's already-fetched results down
+  // with it (see the try/catch below) — with 100+ PRs needing 2+ batches,
+  // that meant a single bad batch could block *all* PRs, including merged
+  // ones, from ever having their lifecycle refreshed.
+  const BATCH_SIZE = 50;
   const result = new Map<string, GitHubPrState>();
 
   for (let i = 0; i < nodeIds.length; i += BATCH_SIZE) {
     const batch = nodeIds.slice(i, i + BATCH_SIZE);
     const query = buildBatchQuery(batch);
 
-    const res = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        Authorization: `bearer ${token}`,
-        "Content-Type": "application/json",
-        "User-Agent": "besiege-daemon",
-      },
-      body: JSON.stringify({ query }),
-    });
+    let json: { data: Record<string, unknown>; errors?: unknown[] };
+    try {
+      const res = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+          Authorization: `bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "besiege-daemon",
+        },
+        body: JSON.stringify({ query }),
+      });
 
-    if (!res.ok) {
-      throw new Error(`GitHub GraphQL responded ${res.status}: ${await res.text()}`);
-    }
+      if (!res.ok) {
+        throw new Error(`GitHub GraphQL responded ${res.status}: ${await res.text()}`);
+      }
 
-    const json = (await res.json()) as { data: Record<string, unknown>; errors?: unknown[] };
-    if (json.errors?.length) {
-      console.warn("GitHub GraphQL partial errors:", json.errors);
+      json = (await res.json()) as { data: Record<string, unknown>; errors?: unknown[] };
+      if (json.errors?.length) {
+        console.warn("GitHub GraphQL partial errors:", json.errors);
+      }
+    } catch (err) {
+      // A single failing batch (rate limit, cost limit, transient network
+      // error) must not discard the results already fetched from other
+      // batches in this call — skip just this batch's PRs and let them pick
+      // up their state on the next sync cycle instead.
+      console.warn(`GitHub GraphQL batch of ${batch.length} failed, skipping:`, err);
+      continue;
     }
 
     batch.forEach((nodeId, j) => {
