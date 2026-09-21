@@ -343,8 +343,8 @@ function PrBoard({
         return (
           <div key={g.branch} className="pr-board-row">
             <button className="pr-board-branch-header" onClick={() => toggleBranch(g.branch)}>
-              <span>
-                {branchExpanded ? "▾" : "▸"} <code>{g.branch}</code>
+              <span className="pr-board-branch-name">
+                {branchExpanded ? "▾" : "▸"} <code title={g.branch}>{g.branch}</code>
               </span>
               <span className="pr-board-count">{g.prs.length}</span>
             </button>
