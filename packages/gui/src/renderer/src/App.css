@@ -550,6 +550,16 @@ body {
   background: var(--surface-active);
 }
 
+.campaign-picker-pill .step-icon-btn {
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.campaign-picker-pill:hover .step-icon-btn,
+.campaign-picker-pill .step-icon-btn:focus-visible {
+  opacity: 1;
+}
+
 .step-edit-form {
   display: inline-flex;
   align-items: center;
@@ -705,8 +715,24 @@ body {
   cursor: pointer;
 }
 
+.pr-board-branch-name {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .pr-board-branch-header code {
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.pr-board-count {
+  flex-shrink: 0;
 }
 
 .pr-board-repo-list {
