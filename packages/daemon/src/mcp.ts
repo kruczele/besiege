@@ -100,6 +100,11 @@ async function resolvePrId(
   // number is given (see prs.ts) — register_pr hits that path and needs more
   // than the 2s default the daemon socket otherwise uses for everything else.
   timeoutMs?: number,
+  // The caller (an agent that just pushed/opened the PR) already knows this
+  // — passing it here skips the daemon needing a GitHub round-trip (which
+  // needs a token and network access) just to learn something the caller
+  // could just say.
+  branchName?: string,
 ): Promise<number> {
   const repoId = await resolveRepoId(campaign, repo);
   const stepId = step ? await resolveStepId(campaign, step) : null;
@@ -108,8 +113,8 @@ async function resolvePrId(
   // field on that row, not part of its identity, so registering the same PR
   // under a different step moves it instead of forking a duplicate. Without
   // a number yet, (repo_id, step_id) is used instead (see routes/prs.ts).
-  // github_pr_number/github_node_id are COALESCEd server-side, so omitting
-  // them here never clobbers a value register_pr already set.
+  // github_pr_number/github_node_id/branch_name are COALESCEd server-side,
+  // so omitting them here never clobbers a value register_pr already set.
   const pr = await postJson<Pr>(
     "/prs",
     {
@@ -117,6 +122,7 @@ async function resolvePrId(
       repo_id: repoId,
       github_pr_number: githubPrNumber,
       github_node_id: githubNodeId,
+      branch_name: branchName,
     },
     timeoutMs,
   );
@@ -318,6 +324,13 @@ const TOOLS = [
               },
               githubPrNumber: { type: "number", description: "The PR number from GitHub, e.g. 42" },
               githubNodeId: { type: "string", description: "Optional GitHub GraphQL node id, if you have it" },
+              branchName: {
+                type: "string",
+                description:
+                  "The PR's head branch, if you know it (you usually do — you're the one who pushed it). " +
+                  "Pass it here instead of leaving the daemon to discover it via a GitHub API round-trip, " +
+                  "which needs a token and network access and won't happen at all if either is unavailable.",
+              },
             },
             required: ["repo", "githubPrNumber"],
           },
@@ -527,7 +540,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           throw new Error("entries (a non-empty array) is required");
         }
         const outcomes = await mapWithConcurrency(entries, REGISTER_PR_CONCURRENCY, async (raw) => {
-          const entry = raw as { repo?: string; step?: string; githubPrNumber?: number; githubNodeId?: string };
+          const entry = raw as {
+            repo?: string;
+            step?: string;
+            githubPrNumber?: number;
+            githubNodeId?: string;
+            branchName?: string;
+          };
           if (!entry.repo || !entry.githubPrNumber) {
             throw new Error(`invalid entry: ${JSON.stringify(raw)}`);
           }
@@ -538,6 +557,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
             entry.githubPrNumber,
             entry.githubNodeId,
             REGISTER_PR_TIMEOUT_MS,
+            entry.branchName,
           );
           return `${entry.repo}${entry.step ? ` (${entry.step})` : ""} -> PR #${entry.githubPrNumber}, pr id ${prId}`;
         });
