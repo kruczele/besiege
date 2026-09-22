@@ -200,7 +200,9 @@ export interface PrClaim {
 export interface ActiveClaim extends PrClaim {
   githubPrNumber: number | null;
   lifecycle: string;
-  stepName: string;
+  // Null when the claimed PR has no step association — claim_pr/register_pr
+  // both allow that (e.g. a single-feature task with no real pipeline stage).
+  stepName: string | null;
   repoName: string;
 }
 

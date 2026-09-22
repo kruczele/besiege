@@ -265,11 +265,16 @@ const TOOLS = [
       type: "object" as const,
       properties: {
         repo: { type: "string", description: 'GitHub full name, e.g. "org/repo"' },
-        step: { type: "string", description: "Step name within the campaign" },
+        step: {
+          type: "string",
+          description:
+            "Step name within the campaign. Optional, same as register_pr — omit it for a single-feature " +
+            "task with no real pipeline stage rather than inventing a step name just to have one.",
+        },
         note: { type: "string", description: "Optional short note about what you're doing" },
         campaign: CAMPAIGN_PROPERTY,
       },
-      required: ["repo", "step"],
+      required: ["repo"],
     },
   },
   {
@@ -279,10 +284,10 @@ const TOOLS = [
       type: "object" as const,
       properties: {
         repo: { type: "string", description: 'GitHub full name, e.g. "org/repo"' },
-        step: { type: "string", description: "Step name within the campaign" },
+        step: { type: "string", description: "Step name within the campaign. Optional — omit if claim_pr was called with no step." },
         campaign: CAMPAIGN_PROPERTY,
       },
-      required: ["repo", "step"],
+      required: ["repo"],
     },
   },
   {
@@ -490,25 +495,29 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "claim_pr": {
         const { repo, step, note } = a;
         const campaign = resolveCampaign(a);
-        if (!repo || !step) throw new Error("repo and step are required");
-        const prId = await resolvePrId(campaign, repo, step);
+        if (!repo) throw new Error("repo is required");
+        const prId = await resolvePrId(campaign, repo, step || undefined);
         await postJson(`/prs/${prId}/claim`, {
           agent_id: `mcp:${SESSION_ID}`,
           session_id: SESSION_ID,
           note,
         });
         claimedPrIds.add(prId);
-        return { content: [{ type: "text", text: `Claimed PR ${prId} (${repo}, step ${step}).` }] };
+        return {
+          content: [{ type: "text", text: `Claimed PR ${prId} (${repo}${step ? `, step ${step}` : ""}).` }],
+        };
       }
 
       case "release_pr": {
         const { repo, step } = a;
         const campaign = resolveCampaign(a);
-        if (!repo || !step) throw new Error("repo and step are required");
-        const prId = await resolvePrId(campaign, repo, step);
+        if (!repo) throw new Error("repo is required");
+        const prId = await resolvePrId(campaign, repo, step || undefined);
         await deleteJson(`/prs/${prId}/claim`);
         claimedPrIds.delete(prId);
-        return { content: [{ type: "text", text: `Released claim on PR ${prId} (${repo}, step ${step}).` }] };
+        return {
+          content: [{ type: "text", text: `Released claim on PR ${prId} (${repo}${step ? `, step ${step}` : ""}).` }],
+        };
       }
 
       case "register_pr": {

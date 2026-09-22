@@ -662,8 +662,24 @@ export const migrations: Migration[] = [
     sql: "-- seed-update-only migration, see BESIEGE_ORIENTATION_RULE_0026 below (updated via `after`)",
     after: (db) => {
       db.prepare("UPDATE config_rules SET context = ? WHERE pattern = '*' AND context = ?").run(
-        BESIEGE_ORIENTATION_RULE,
+        BESIEGE_ORIENTATION_RULE_0036,
         BESIEGE_ORIENTATION_RULE_0026,
+      );
+    },
+  },
+  {
+    // Another seed-update-only migration (see 0022/0026/0036). 0036's bullet
+    // told agents to claim_pr a single-feature PR "unprompted" without
+    // mentioning step was still required at the time — agents complied by
+    // inventing a throwaway step name per PR, cluttering the campaign's
+    // Steps list with junk. claim_pr/release_pr are now step-optional (same
+    // MCP tool schema change, see mcp.ts) and this bullet says so.
+    name: "0037_besiege_orientation_rule_claim_step_optional",
+    sql: "-- seed-update-only migration, see BESIEGE_ORIENTATION_RULE_0036 below (updated via `after`)",
+    after: (db) => {
+      db.prepare("UPDATE config_rules SET context = ? WHERE pattern = '*' AND context = ?").run(
+        BESIEGE_ORIENTATION_RULE,
+        BESIEGE_ORIENTATION_RULE_0036,
       );
     },
   },
@@ -744,13 +760,28 @@ const BESIEGE_ORIENTATION_RULE_0026 = `You're running inside Besiege, a daemon-b
 
 This rule was seeded by Besiege and applies everywhere (pattern '*'). Edit or delete it from the Edicts tab if it stops being accurate.`;
 
-// Current version — what 0036 updates a still-unedited row to.
-const BESIEGE_ORIENTATION_RULE = `You're running inside Besiege, a daemon-backed console for coding-agent work across multiple repos in a campaign. A few things worth knowing:
+// What 0036 updated a still-unedited row to — frozen exactly as shipped so
+// 0037 can tell whether a row still holds this text (and is therefore safe
+// to update) or has since been user-edited/deleted (and must be left alone).
+const BESIEGE_ORIENTATION_RULE_0036 = `You're running inside Besiege, a daemon-backed console for coding-agent work across multiple repos in a campaign. A few things worth knowing:
 
 - Environment: BESIEGE_CAMPAIGN_ID and BESIEGE_SESSION_ID identify this session; BESIEGE_STEP_ID/BESIEGE_PR_ID/BESIEGE_REPO are also set if you were dispatched against a specific PR.
 - The besiege MCP server, if wired into this session, exposes pr_state / pending_tasks / failure_pattern for reading campaign state, and claim_pr / release_pr / create_task / notify / register_pr for acting on it.
 - Once you've actually opened a PR (e.g. after \`gh pr create\`), call register_pr — that's the only way the daemon learns it exists at all. It takes a list, so if you're working across many repos, register them all in one call instead of one call each. A repo doesn't need to be registered in the campaign beforehand — register_pr (and claim_pr) add it automatically the first time you mention it.
 - Once you know which (repo, step) you're actually working on, call claim_pr — that's what makes you show up with real PR context on the campaign's Army tab. It's cheap and advisory, so call it as soon as you know, not only once you're sure.
+- register_pr and claim_pr aren't just for multi-repo rollouts — if the task is delivering a single feature behind one PR, register and claim that PR too, unprompted, as soon as it exists and you're on it. Same payoff at any scale: accurate board state and one-click access from the GUI, instead of a task that's invisible until someone asks.
+- Call notify any time a human needs to look: you're blocked or have a question, or you've finished the task you were given and it's ready for review — either way, notify goes straight into the operator's attention inbox instead of you just stopping silently.
+- If you find work that should apply to every PR in a step, not just the one you're on, register it with create_task instead of only fixing it locally.
+
+This rule was seeded by Besiege and applies everywhere (pattern '*'). Edit or delete it from the Edicts tab if it stops being accurate.`;
+
+// Current version — what 0037 updates a still-unedited row to.
+const BESIEGE_ORIENTATION_RULE = `You're running inside Besiege, a daemon-backed console for coding-agent work across multiple repos in a campaign. A few things worth knowing:
+
+- Environment: BESIEGE_CAMPAIGN_ID and BESIEGE_SESSION_ID identify this session; BESIEGE_STEP_ID/BESIEGE_PR_ID/BESIEGE_REPO are also set if you were dispatched against a specific PR.
+- The besiege MCP server, if wired into this session, exposes pr_state / pending_tasks / failure_pattern for reading campaign state, and claim_pr / release_pr / create_task / notify / register_pr for acting on it.
+- Once you've actually opened a PR (e.g. after \`gh pr create\`), call register_pr — that's the only way the daemon learns it exists at all. It takes a list, so if you're working across many repos, register them all in one call instead of one call each. A repo doesn't need to be registered in the campaign beforehand — register_pr (and claim_pr) add it automatically the first time you mention it.
+- Once you know which (repo, step) you're actually working on, call claim_pr — that's what makes you show up with real PR context on the campaign's Army tab. It's cheap and advisory, so call it as soon as you know, not only once you're sure. step is optional on both, same as register_pr — leave it out rather than inventing a step name for a task that doesn't actually have one; only pass a real step when the campaign genuinely organizes work into pipeline stages.
 - register_pr and claim_pr aren't just for multi-repo rollouts — if the task is delivering a single feature behind one PR, register and claim that PR too, unprompted, as soon as it exists and you're on it. Same payoff at any scale: accurate board state and one-click access from the GUI, instead of a task that's invisible until someone asks.
 - Call notify any time a human needs to look: you're blocked or have a question, or you've finished the task you were given and it's ready for review — either way, notify goes straight into the operator's attention inbox instead of you just stopping silently.
 - If you find work that should apply to every PR in a step, not just the one you're on, register it with create_task instead of only fixing it locally.

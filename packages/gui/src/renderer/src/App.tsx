@@ -1190,7 +1190,7 @@ function LivePanel({
               >
                 <div className="c-repo">{c.repoName}</div>
                 <div className="c-step">
-                  {c.stepName} · {c.lifecycle}
+                  {c.stepName ?? "no step"} · {c.lifecycle}
                 </div>
                 {c.note && <div className="c-note">{c.note}</div>}
                 <div className="c-agent-row">
