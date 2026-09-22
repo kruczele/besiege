@@ -154,9 +154,10 @@ export function registerPrRoutes(
       repo_id?: number;
       github_pr_number?: number;
       github_node_id?: string;
+      branch_name?: string;
     };
   }>("/prs", async (req, reply) => {
-    const { step_id, repo_id, github_pr_number, github_node_id } = req.body ?? {};
+    const { step_id, repo_id, github_pr_number, github_node_id, branch_name } = req.body ?? {};
     if (!repo_id) {
       reply.code(400);
       return { error: "repo_id is required" };
@@ -213,26 +214,30 @@ export function registerPrRoutes(
              step_id = COALESCE(?, step_id),
              github_pr_number = COALESCE(?, github_pr_number),
              github_node_id = COALESCE(?, github_node_id),
+             branch_name = COALESCE(?, branch_name),
              lifecycle = CASE WHEN ? != 'not-started' THEN ? ELSE lifecycle END
            WHERE id = ?`,
-        ).run(stepId, prNumber, github_node_id ?? null, lifecycle, lifecycle, existing.id);
+        ).run(stepId, prNumber, github_node_id ?? null, branch_name ?? null, lifecycle, lifecycle, existing.id);
         return db.prepare("SELECT * FROM prs WHERE id = ?").get(existing.id) as PrRow;
       }
 
       const info = db
         .prepare(
-          `INSERT INTO prs (step_id, repo_id, github_pr_number, github_node_id, lifecycle, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO prs (step_id, repo_id, github_pr_number, github_node_id, branch_name, lifecycle, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(stepId, repo_id, prNumber, github_node_id ?? null, lifecycle, now);
+        .run(stepId, repo_id, prNumber, github_node_id ?? null, branch_name ?? null, lifecycle, now);
       return db.prepare("SELECT * FROM prs WHERE id = ?").get(info.lastInsertRowid) as PrRow;
     })();
 
     // register_pr only requires a PR number, not a node id — without one,
-    // branch_name/CI/review state can never be filled in by syncPr/
-    // syncAllActivePrs (both require github_node_id). Resolve it here, once,
-    // from the (repo, number) the caller did give us, so a number-only
-    // registration still ends up fully synced instead of stuck forever.
+    // CI/review state can never be filled in by syncPr/syncAllActivePrs
+    // (both require github_node_id). Resolve it here, once, from the (repo,
+    // number) the caller did give us, so a number-only registration still
+    // ends up fully synced instead of stuck forever. branch_name is a side
+    // effect of this same GitHub call only as a fallback — the caller
+    // usually already knows it (it pushed the branch) and passed it above,
+    // in which case the COALESCE below is a no-op.
     if (row.github_pr_number && !row.github_node_id) {
       const token = getGitHubToken();
       if (token) {
