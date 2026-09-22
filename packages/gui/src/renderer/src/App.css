@@ -1229,6 +1229,40 @@ body {
   padding: 0.25rem;
 }
 
+.pane-pinned-prs {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.pane-pinned-pr-chip {
+  display: flex;
+  align-items: center;
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+a.pane-pinned-pr-chip:hover {
+  border-color: var(--accent);
+}
+
+.pane-pinned-pr-number {
+  color: var(--text-secondary);
+}
+
+.pane-pinned-pr-count {
+  color: var(--text-secondary);
+}
+
 .pane-loading {
   margin: auto;
 }

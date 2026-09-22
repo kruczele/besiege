@@ -1,10 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { Copy, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
-import type { AgentAdapter, Campaign, PaneNode, PaneNote, TerminalLayout, TerminalSession } from "../../shared/types.js";
+import type {
+  ActiveClaim,
+  AgentAdapter,
+  Campaign,
+  PaneNode,
+  PaneNote,
+  TerminalLayout,
+  TerminalSession,
+} from "../../shared/types.js";
 import { closePane, emptyTree, leavesInOrder, setPaneSession, setSizes, splitPane } from "./pane-tree.js";
 
 const POLL_SESSIONS = 3000;
@@ -180,6 +188,46 @@ function relativeTime(iso: string): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// Above this many claimed PRs, an agent is doing bulk campaign work — a
+// footer full of individual chips stops being a quick-glance aid and starts
+// being clutter, so it collapses to a count instead.
+const PINNED_PR_CHIP_LIMIT = 3;
+
+// The PR(s) a pane's agent currently has claimed (claim_pr), pinned to the
+// bottom of its own pane for one-click access — register_pr alone carries no
+// agent attribution, so claims (which do carry the claiming session's id)
+// are what let this be scoped per-agent rather than per-campaign.
+function PinnedPrBar({ claims }: { claims: ActiveClaim[] }) {
+  const openable = claims.filter((c) => c.githubPrNumber !== null);
+  if (openable.length === 0) return null;
+
+  if (openable.length > PINNED_PR_CHIP_LIMIT) {
+    return (
+      <div className="pane-pinned-prs">
+        <span className="pane-pinned-pr-chip pane-pinned-pr-count">{openable.length} PRs</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pane-pinned-prs">
+      {openable.map((c) => (
+        <a
+          key={c.id}
+          className="pane-pinned-pr-chip"
+          href={`https://github.com/${c.repoName}/pull/${c.githubPrNumber}`}
+          target="_blank"
+          rel="noreferrer"
+          title={c.repoName}
+        >
+          {c.repoName.split("/").pop()}
+          <span className="pane-pinned-pr-number">#{c.githubPrNumber}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 // A panel pinned by the pin_note MCP tool — plain, pre-wrapped text (not
 // rendered markdown) so it shows exactly what the agent sent, with no new
 // rendering dependency.
@@ -200,6 +248,7 @@ function PaneView({
   sessions,
   titles,
   adapters,
+  claimsBySessionId,
   activePaneId,
   onTitle,
   onActivate,
@@ -214,6 +263,11 @@ function PaneView({
   sessions: TerminalSession[];
   titles: Record<number, string>;
   adapters: AgentAdapter[];
+  // Keyed by the agent's own session id (TerminalSession.agentSessionId,
+  // what claim_pr attributes a claim to) — not the terminal id — so a pane
+  // can look up its own agent's claims regardless of which terminal row
+  // currently backs it (e.g. after a resume).
+  claimsBySessionId: Record<string, ActiveClaim[]>;
   activePaneId: string | null;
   onTitle: (id: number, title: string) => void;
   onActivate: (paneId: string) => void;
@@ -231,6 +285,7 @@ function PaneView({
         sessions={sessions}
         titles={titles}
         adapters={adapters}
+        claimsBySessionId={claimsBySessionId}
         activePaneId={activePaneId}
         onTitle={onTitle}
         onActivate={onActivate}
@@ -249,6 +304,7 @@ function PaneView({
   const isExited = session?.status === "exited";
   const adapter = session?.agentAdapterName != null ? adapters.find((a) => a.name === session.agentAdapterName) : undefined;
   const canResume = isExited && adapter?.resumeFlag != null && session?.agentSessionId != null;
+  const pinnedClaims = session?.agentSessionId != null ? claimsBySessionId[session.agentSessionId] ?? [] : [];
 
   return (
     <div className={`terminal-grid-pane ${isActive ? "active" : ""}`} onMouseDownCapture={() => onActivate(node.id)}>
@@ -292,7 +348,10 @@ function PaneView({
           resume={canResume ? { agentName: adapter!.name, onResume: () => onResume(node.id, session.id) } : undefined}
         />
       ) : (
-        <TerminalView id={session.id} onTitle={(title) => onTitle(session.id, title)} />
+        <>
+          <TerminalView id={session.id} onTitle={(title) => onTitle(session.id, title)} />
+          <PinnedPrBar claims={pinnedClaims} />
+        </>
       )}
     </div>
   );
@@ -380,6 +439,7 @@ export function TerminalsMain({
 }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
+  const [claims, setClaims] = useState<ActiveClaim[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [adapters, setAdapters] = useState<AgentAdapter[]>([]);
 
@@ -461,13 +521,19 @@ export function TerminalsMain({
   useEffect(() => {
     if (campaignId === null) {
       setSessions([]);
+      setClaims([]);
       return;
     }
     let cancelled = false;
 
     const poll = async () => {
-      const res = await window.api.listTerminals(campaignId);
-      if (!cancelled && res.ok) setSessions(res.result);
+      const [sessionsRes, claimsRes] = await Promise.all([
+        window.api.listTerminals(campaignId),
+        window.api.listCampaignClaims(campaignId),
+      ]);
+      if (cancelled) return;
+      if (sessionsRes.ok) setSessions(sessionsRes.result);
+      if (claimsRes.ok) setClaims(claimsRes.result);
     };
 
     poll();
@@ -477,6 +543,17 @@ export function TerminalsMain({
       clearInterval(t);
     };
   }, [campaignId]);
+
+  // Regrouped only when the claims list itself changes — the pane tree
+  // re-renders on every layouts poll tick regardless, but there's no reason
+  // to rebuild this map on ticks where claims didn't move.
+  const claimsBySessionId = useMemo(() => {
+    const map: Record<string, ActiveClaim[]> = {};
+    for (const c of claims) {
+      (map[c.sessionId] ??= []).push(c);
+    }
+    return map;
+  }, [claims]);
 
   const activeLayout = layouts.find((l) => l.id === activeLayoutId) ?? null;
 
@@ -701,6 +778,7 @@ export function TerminalsMain({
             sessions={sessions}
             titles={titles}
             adapters={adapters}
+            claimsBySessionId={claimsBySessionId}
             activePaneId={activePaneId}
             onTitle={onTitleChange}
             onActivate={setActivePaneId}
