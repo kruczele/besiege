@@ -556,6 +556,12 @@ export function registerPrRoutes(
       reply.code(404);
       return { error: "campaign not found" };
     }
+    // campaign_steps is a LEFT JOIN (not the campaign-scoping anchor) — a
+    // claim on a stepless PR (claim_pr/register_pr called with no step,
+    // e.g. a single-feature task with no real pipeline stage) is still an
+    // active agent and belongs on the Live board, just with no step name.
+    // campaign_repos is the scoping anchor instead, since every PR has a
+    // repo regardless of whether it has a step.
     const rows = db
       .prepare(
         `SELECT pc.*,
@@ -564,15 +570,15 @@ export function registerPrRoutes(
                 cr.github_full_name AS repo_name
          FROM pr_claims pc
          JOIN prs p ON p.id = pc.pr_id
-         JOIN campaign_steps cs ON cs.id = p.step_id
          JOIN campaign_repos cr ON cr.id = p.repo_id
-         WHERE cs.campaign_id = ? AND pc.released_at IS NULL
+         LEFT JOIN campaign_steps cs ON cs.id = p.step_id
+         WHERE cr.campaign_id = ? AND pc.released_at IS NULL
          ORDER BY pc.claimed_at DESC`,
       )
       .all(req.params.campaignId) as (ClaimRow & {
         github_pr_number: number | null;
         lifecycle: string;
-        step_name: string;
+        step_name: string | null;
         repo_name: string;
       })[];
 
