@@ -683,6 +683,38 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: "0038_fleet_placement",
+    sql: `
+      -- Which machine runs each session, and its handle there. host_id NULL
+      -- means "this daemon" (every row written before fleets existed).
+      -- exec_id is the PTY's id on that host (see pty-host.ts), distinct
+      -- from the row id so a session can live on a machine whose own DB
+      -- never hears of it.
+      ALTER TABLE terminal_sessions ADD COLUMN host_id TEXT;
+      ALTER TABLE terminal_sessions ADD COLUMN exec_id TEXT;
+      -- 'placing' while the scheduler picks (and possibly wakes) a host,
+      -- 'placed' once the PTY exists, 'failed' if nothing could run it.
+      ALTER TABLE terminal_sessions ADD COLUMN placement_status TEXT NOT NULL DEFAULT 'placed';
+      ALTER TABLE terminal_sessions ADD COLUMN placement_note TEXT;
+      ALTER TABLE terminal_sessions ADD COLUMN placed_at TEXT;
+      -- Highest process-tree RSS seen for this session; feeds the
+      -- scheduler's per-adapter cost estimate.
+      ALTER TABLE terminal_sessions ADD COLUMN peak_rss_bytes INTEGER;
+      CREATE INDEX terminal_sessions_exec_id ON terminal_sessions(exec_id);
+
+      -- Last heartbeat per host. Persisted (not just in memory) so a
+      -- control-plane restart can still tell that a host rebooted while it
+      -- was down, by comparing boot_id.
+      CREATE TABLE fleet_hosts (
+        host_id TEXT PRIMARY KEY,
+        boot_id TEXT NOT NULL,
+        url TEXT,
+        stats TEXT,
+        last_seen_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 // Pre-0031, a split was a binary { dir, ratio, a, b } node (nesting two

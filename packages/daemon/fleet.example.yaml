@@ -1,0 +1,52 @@
+# Example fleet.yaml — copy to $BESIEGE_STATE_DIR/fleet.yaml on the control
+# plane. Every key is optional; see the "Fleet" section of README.md.
+
+placement:
+  # Tried in this order until one yields a host.
+  order: [origin, pool, wake, last_resort]
+  # Max projected use per host, with the new session's estimated cost added.
+  limits: { memory: 0.80, cpu: 0.80 }
+  # Cost assumed for an agent session until its adapter has history.
+  default_cost: { memory: 4GiB, cpu: 1 }
+  wake_timeout: 90s
+  # A host silent for longer than this is offline for placement purposes.
+  offline_after: 15s
+
+# Applied to any host that heartbeats in but isn't listed below.
+defaults:
+  pool: true
+  tags: []
+  wake: none
+  # How long a silent host shows as "recovering" before "offline".
+  restart_grace: 2m
+
+hosts:
+  # The always-on control plane: never picked by normal placement, but
+  # holds one session when nothing else can.
+  mac:
+    pool: false
+    last_resort:
+      slots: 1
+      nice: 10
+      env: {}   # e.g. a lower subagent cap for the agent CLI
+
+  # On the same LAN as the control plane, so it can be woken from there.
+  krukomp:
+    tags: [docker]
+    wake:
+      method: wol
+      via: mac
+      mac_address: "aa:bb:cc:dd:ee:ff"
+
+  # Always on, but its WSL instance is restarted by a healthcheck now and
+  # then — give it time to come back before calling it offline.
+  krukoffice:
+    restart_grace: 15m
+
+  # Waking a machine on another network goes through something that's on
+  # that network, using any command:
+  # far-box:
+  #   wake:
+  #     method: command
+  #     via: some-pi
+  #     run: "wakeonlan aa:bb:cc:dd:ee:ff"

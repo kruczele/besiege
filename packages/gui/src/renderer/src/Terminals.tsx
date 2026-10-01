@@ -312,6 +312,11 @@ function PaneView({
         <span className={`terminal-grid-pane-title ${isExited ? "exited" : ""}`}>
           {node.note ? node.note.title : session ? titles[session.id] ?? session.label ?? `Terminal #${session.id}` : "Empty"}
         </span>
+        {session?.fleetPlaced && (
+          <span className="terminal-grid-pane-host" title={session.placementNote ?? undefined}>
+            {session.hostId}
+          </span>
+        )}
         <div className="terminal-grid-pane-actions">
           {node.note && (
             <button

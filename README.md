@@ -70,12 +70,14 @@ This started from an org-wide rollout across ~300 repos producing ~1,200 PRs. Gi
 
 The daemon is the single source of truth. The GUI, its web UI, and the TUI are all thin clients over its Unix socket API — no orchestration logic lives in any front-end.
 
-Each machine's daemon can optionally defer to another machine's over the
-network (e.g. a laptop preferring an always-on box's daemon over Tailscale
-when it's reachable, falling back to its own local DB otherwise) — see
-[`packages/daemon`](packages/daemon)'s "Remote peer" section. This is
-transparent to every client above: they always just talk to their own
-machine's Unix socket.
+Across several machines, one always-on daemon acts as the control plane
+for the rest. Sessions run on the machine you start them from (or, when
+it's out of capacity, on whichever connected machine has room), while the
+control plane keeps track of all of them, so any client can attach to any
+session from anywhere. Placement is driven by a single `fleet.yaml` on the
+control plane. See [`packages/daemon`](packages/daemon)'s "Fleet" section.
+Clients don't change: they always just talk to their own machine's Unix
+socket.
 
 ## Packages
 

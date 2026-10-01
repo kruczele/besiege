@@ -1,20 +1,24 @@
-import * as pty from "@lydell/node-pty";
-import type { IPty } from "@lydell/node-pty";
+// The control-plane half of a terminal session: the terminal_sessions row,
+// where it runs, and keeping that row truthful. The PTY itself lives in
+// pty-host.ts on whichever host the scheduler (fleet.ts) picked — this
+// daemon, or another one reached over its /exec/* API.
 import type Database from "better-sqlite3";
-import type { WebSocket } from "ws";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { findAgentConfig, type AgentConfig } from "./agent-config.js";
-import { stripInheritedAgentEnv } from "./env.js";
-import { stateDir } from "./paths.js";
+import { choosePlacement, fleetToken, hostUrl, PlacementError, type Placement, type PlacementRequest } from "./fleet.js";
+import type { Heartbeat } from "./heartbeat.js";
+import { hostId as selfId } from "./host.js";
+import { remapSessionIds, sessionIdsInTree, type PaneNode } from "./layout-tree.js";
+import * as ptyHost from "./pty-host.js";
+import { LaunchError, type LaunchSpec } from "./pty-host.js";
+import { killRemote, launchRemote } from "./remote-exec.js";
 
-// Ring buffer cap: last ~200KB of output per session. A chatty long-lived
-// session (tail -f, a build loop) must not grow the daemon's memory forever.
-const RING_BUFFER_MAX_BYTES = 200_000;
+// How long POST /terminals waits for placement before answering with a
+// still-'placing' row. Covers every normal placement; only a wake outlasts it.
+const SYNC_PLACEMENT_WAIT_MS = 3000;
+
+// A placed session missing from its host's heartbeat is only presumed lost
+// once it's older than this — the heartbeat may simply predate it.
+const LOST_SESSION_GRACE_MS = 30_000;
 
 export interface TerminalSessionRow {
   id: number;
@@ -32,404 +36,378 @@ export interface TerminalSessionRow {
   extra_args: string | null;
   agent_session_id: string | null;
   // Only set for adapters that can't pre-assign a conversation id (agy) —
-  // see sessionIdFromWorkspaceCache below. NULL for every other adapter;
-  // resume call sites fall back to agent_session_id in that case.
+  // see resolveResumeConversationId in pty-host.ts. NULL for every other
+  // adapter; resume falls back to agent_session_id in that case.
   resume_session_id: string | null;
+  // NULL means this daemon (rows from before fleets existed).
+  host_id: string | null;
+  exec_id: string | null;
+  placement_status: "placing" | "placed" | "failed";
+  placement_note: string | null;
+  placed_at: string | null;
+  peak_rss_bytes: number | null;
 }
 
-// Shared across every session — the besiege MCP server is a single stdio
-// process description (not session-specific), so one config file on disk is
-// enough; agents just point at it via their own --mcp-config-style flag.
-const MCP_CONFIG_PATH = join(stateDir, "mcp-config.json");
-
-// This module runs as either dist/terminals.js (prod) or src/terminals.ts
-// (dev, under tsx watch) — import.meta.url differs between the two, so it is
-// NOT a stable anchor for the mcp entry point. Going one directory up from
-// wherever this file happens to live always lands on the daemon package
-// root, from which dist/mcp.js — the one built, runnable entry point,
-// regardless of which mode the daemon itself is running under — is stable.
-const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const MCP_ENTRY_POINT = join(PACKAGE_ROOT, "dist", "mcp.js");
-
-// Regenerated on every call rather than left in place once written: a stale
-// file from a wrong dev/prod mode or a moved install would otherwise wire
-// every future agent session to a command that no longer exists, silently.
-function ensureMcpConfig(): string {
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(
-    MCP_CONFIG_PATH,
-    JSON.stringify(
-      {
-        mcpServers: {
-          besiege: { command: process.execPath, args: [MCP_ENTRY_POINT] },
-        },
-      },
-      null,
-      2,
-    ),
-  );
-  return MCP_CONFIG_PATH;
+export function sessionHost(row: Pick<TerminalSessionRow, "host_id">): string {
+  return row.host_id ?? selfId;
 }
 
-// For CLIs where MCP is a persistent named registry rather than a
-// per-launch flag (agy's `agy mcp add <name> <cmd> [args]`, "add or
-// update") — run the adapter's registration command once before spawn.
-// Same "regenerate every call, never trust a prior run" rationale as
-// ensureMcpConfig; fails open (a broken/missing binary here must not block
-// the session itself from starting, it just starts without Besiege's MCP
-// tools).
-function ensureMcpRegistered(adapter: AgentConfig): void {
-  if (!adapter.mcpRegisterCommand) return;
-  try {
-    const argv = splitArgs(adapter.mcpRegisterCommand).map((token) =>
-      token.replace("{execPath}", process.execPath).replace("{mcpEntryPoint}", MCP_ENTRY_POINT),
-    );
-    execFileSync(adapter.binary, argv, { timeout: 5000, stdio: "ignore" });
-  } catch {
-    // Binary missing, registry unreachable, etc — spawn proceeds without it.
-  }
+export interface SpawnRequest {
+  campaignId: number;
+  cwd: string;
+  label?: string;
+  agentAdapterName?: string;
+  yolo?: boolean;
+  extraArgs?: string;
+  origin: string | null;
+  host?: string;
+  requires?: string[];
+  // Continue this session's agent conversation. Pins placement to its host,
+  // since that's where the agent CLI keeps the transcript.
+  resumeFrom?: TerminalSessionRow;
 }
 
-// Best-effort read of a workspace-keyed session-cache file (agy's
-// last_conversations.json: absolute cwd -> conversation id). Missing file /
-// malformed JSON / wrong shape all resolve to "no entry" rather than
-// throwing — this is undocumented third-party state, never trusted to be
-// well-formed.
-function readWorkspaceCacheEntry(path: string, cwd: string): string | undefined {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(expandHome(path), "utf8"));
-    if (parsed && typeof parsed === "object") {
-      const value = (parsed as Record<string, unknown>)[cwd];
-      if (typeof value === "string") return value;
-    }
-  } catch {
-    // no file yet, bad JSON, etc.
-  }
-  return undefined;
+export type SpawnResult = { ok: true; row: TerminalSessionRow } | { ok: false; status: number; error: string };
+
+function getRow(db: Database.Database, id: number): TerminalSessionRow | undefined {
+  return db.prepare("SELECT * FROM terminal_sessions WHERE id = ?").get(id) as TerminalSessionRow | undefined;
 }
 
-// For adapters with sessionIdFromWorkspaceCache set (agy): the CLI mints
-// its own conversation id and only surfaces it, undocumented, via a
-// workspace-path-keyed cache file it writes shortly after an interactive
-// session starts in that cwd. Poll for a *change* from whatever was there
-// before spawn (not just presence — a stale entry from an earlier, unrelated
-// session in the same dir would otherwise be misattributed to this one) and
-// persist it as resume_session_id once found. Give up silently after a
-// timeout, and bail early if the session has already exited — this is
-// strictly best-effort, resume just isn't offered if it never lands.
-function discoverWorkspaceCacheSessionId(
-  db: Database.Database,
-  terminalId: number,
-  cachePath: string,
-  cwd: string,
-  previousValue: string | undefined,
-): void {
-  const deadline = Date.now() + 20_000;
-  const poll = () => {
-    if (!live.has(terminalId)) return; // session already exited
-    const current = readWorkspaceCacheEntry(cachePath, cwd);
-    if (current && current !== previousValue) {
-      db.prepare("UPDATE terminal_sessions SET resume_session_id = ? WHERE id = ?").run(current, terminalId);
-      return;
-    }
-    if (Date.now() < deadline) setTimeout(poll, 1000);
-  };
-  setTimeout(poll, 1000);
-}
-
-// Quoted-segment aware tokenizer for the free-text "extra args" field, so
-// e.g. --append-system-prompt "some text" stays a single argv entry instead
-// of being split on the space inside the quotes.
-function splitArgs(input: string): string[] {
-  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  const args: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(input)) !== null) {
-    args.push(match[1] ?? match[2] ?? match[3]);
-  }
-  return args;
-}
-
-// A cwd typed by hand (campaign default_dir, terminal cwd override) commonly
-// starts with "~" the way a shell prompt would accept — but pty.spawn's cwd
-// option is a raw chdir(), no shell in between to expand it, so a literal
-// "~/..." silently fails to chdir and the process exits immediately.
-function expandHome(cwd: string): string {
-  if (cwd === "~") return homedir();
-  if (cwd.startsWith("~/")) return join(homedir(), cwd.slice(2));
-  return cwd;
-}
-
-interface LiveSession {
-  id: number;
-  pty: IPty;
-  buffer: string;
-  subscribers: Set<WebSocket>;
-}
-
-const live = new Map<number, LiveSession>();
-
-function appendToBuffer(session: LiveSession, chunk: string): void {
-  session.buffer += chunk;
-  if (session.buffer.length > RING_BUFFER_MAX_BYTES) {
-    session.buffer = session.buffer.slice(session.buffer.length - RING_BUFFER_MAX_BYTES);
-  }
-}
-
-function broadcast(session: LiveSession, msg: unknown): void {
-  const data = JSON.stringify(msg);
-  for (const ws of session.subscribers) {
-    if (ws.readyState === ws.OPEN) ws.send(data);
-  }
-}
-
-export function spawnSession(
-  db: Database.Database,
-  campaignId: number,
-  cwd: string,
-  label?: string,
-  agentAdapterName?: string,
-  yolo?: boolean,
-  extraArgs?: string,
-  // Set only by resumeSessionsOnBoot, continuing a prior agent conversation
-  // by id instead of minting a fresh one.
-  resumeAgentSessionId?: string,
-  // The id to feed the adapter's resumeFlag template. Usually identical to
-  // resumeAgentSessionId (Claude: Besiege mints one id and it plays both
-  // roles), but adapters that can't pre-assign their own conversation id
-  // (sessionIdFromWorkspaceCache set — agy) need a separately-discovered
-  // value here, since resumeAgentSessionId there is only Besiege's own
-  // correlation id, not a real conversation id. See
-  // resolveResumeConversationId, which callers use to compute this.
-  resumeConversationId?: string,
-): TerminalSessionRow {
-  cwd = expandHome(cwd);
-
-  const adapter = agentAdapterName ? findAgentConfig(agentAdapterName) : undefined;
-  if (adapter) ensureMcpRegistered(adapter);
-
-  // Snapshotted before spawn so the post-launch poll below can tell a fresh
-  // entry apart from a stale one already sitting in the cache file for this
-  // cwd from an earlier, unrelated session.
-  const workspaceCacheEntryBefore =
-    !resumeAgentSessionId && adapter?.sessionIdFromWorkspaceCache
-      ? readWorkspaceCacheEntry(adapter.sessionIdFromWorkspaceCache, cwd)
-      : undefined;
-
-  const command = adapter?.binary ?? "zsh";
-  const mcpArgs = adapter?.mcpConfigFlag
-    ? splitArgs(adapter.mcpConfigFlag).map((token) => token.replace("{path}", ensureMcpConfig()))
-    : [];
-
-  // A fresh session on an adapter that supports resume gets a pinned id up
-  // front, so a later daemon restart has something to pass to resume_flag;
-  // a boot-time resume instead reuses the id it's continuing.
-  const agentSessionId = resumeAgentSessionId ?? (adapter?.sessionIdFlag ? randomUUID() : null);
-  const sessionArgs =
-    resumeAgentSessionId && adapter?.resumeFlag
-      ? splitArgs(adapter.resumeFlag).map((token) =>
-          token.replace("{sessionId}", resumeConversationId ?? resumeAgentSessionId),
-        )
-      : agentSessionId && adapter?.sessionIdFlag
-        ? splitArgs(adapter.sessionIdFlag).map((token) => token.replace("{sessionId}", agentSessionId))
-        : [];
-
-  const argv = adapter
-    ? [
-        ...mcpArgs,
-        ...sessionArgs,
-        ...(yolo && adapter.yoloFlag ? [adapter.yoloFlag] : []),
-        ...(extraArgs ? splitArgs(extraArgs) : []),
-      ]
-    : [];
-
-  // Lets MCP tool calls from inside this session self-identify without the
-  // agent needing to pass a campaign id on every call — mirrors the
-  // BESIEGE_* env vars `besiege dispatch` already sets (cli.ts). Reuses the
-  // adapter's own resumable conversation id when there is one, so claims
-  // and notifications made before *and* after a boot-time resume tie back
-  // to the same logical session.
-  const besiegeSessionId = agentSessionId ?? randomUUID();
-  // Always persisted below (even for adapters without resume support, and
-  // plain shells) so GET /terminal-sessions/by-agent-session/:id can resolve
-  // ANY session's notifications/claims back to it — resumability itself is
-  // still gated separately on adapter.resumeFlag (see resumeSessionsOnBoot
-  // and the resume route), never on this column's mere presence.
-  const proc = pty.spawn(command, argv, {
-    cols: 80,
-    rows: 24,
-    cwd,
-    env: {
-      ...stripInheritedAgentEnv(process.env),
-      BESIEGE_CAMPAIGN_ID: String(campaignId),
-      BESIEGE_SESSION_ID: besiegeSessionId,
-    },
-  });
-
-  const createdAt = new Date().toISOString();
+function insertRow(db: Database.Database, req: SpawnRequest): number {
+  const prior = req.resumeFrom;
   const info = db
     .prepare(
-      "INSERT INTO terminal_sessions (campaign_id, label, cwd, pid, status, created_at, agent_adapter_name, yolo, extra_args, agent_session_id) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)",
+      `INSERT INTO terminal_sessions
+         (campaign_id, label, cwd, status, created_at, agent_adapter_name, yolo, extra_args,
+          agent_session_id, resume_session_id, placement_status)
+       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, 'placing')`,
     )
     .run(
-      campaignId,
-      label ?? adapter?.name ?? null,
-      cwd,
-      proc.pid,
-      createdAt,
-      adapter?.name ?? null,
-      yolo && adapter ? 1 : 0,
-      adapter && extraArgs?.trim() ? extraArgs.trim() : null,
-      besiegeSessionId,
+      req.campaignId,
+      req.label || req.agentAdapterName || null,
+      req.cwd,
+      new Date().toISOString(),
+      req.agentAdapterName ?? null,
+      req.yolo && req.agentAdapterName ? 1 : 0,
+      req.agentAdapterName && req.extraArgs?.trim() ? req.extraArgs.trim() : null,
+      // Persisted for every session, not only resumable ones, so
+      // GET /terminal-sessions/by-agent-session/:id can resolve any
+      // session's notifications/claims back to it. Reused on resume so
+      // claims made before and after tie back to the same logical session.
+      prior?.agent_session_id ?? randomUUID(),
+      prior?.resume_session_id ?? null,
     );
-  const id = Number(info.lastInsertRowid);
-
-  const session: LiveSession = { id, pty: proc, buffer: "", subscribers: new Set() };
-  live.set(id, session);
-
-  if (!resumeAgentSessionId && adapter?.sessionIdFromWorkspaceCache) {
-    discoverWorkspaceCacheSessionId(db, id, adapter.sessionIdFromWorkspaceCache, cwd, workspaceCacheEntryBefore);
-  }
-
-  proc.onData((chunk) => {
-    appendToBuffer(session, chunk);
-    broadcast(session, { type: "output", data: chunk });
-  });
-
-  proc.onExit(({ exitCode }) => {
-    // Guard against double-handling: an explicit kill (killSession /
-    // killAllLiveSessions) already deletes the map entry and writes the db
-    // row synchronously, since it can't wait for this async event to land
-    // before the daemon shuts down and closes the db.
-    if (!live.has(id)) return;
-    db.prepare(
-      "UPDATE terminal_sessions SET status = 'exited', exit_code = ?, exited_at = ? WHERE id = ?",
-    ).run(exitCode, new Date().toISOString(), id);
-    broadcast(session, { type: "exit", exitCode });
-    live.delete(id);
-  });
-
-  return db.prepare("SELECT * FROM terminal_sessions WHERE id = ?").get(id) as TerminalSessionRow;
+  return Number(info.lastInsertRowid);
 }
 
-export function attachSubscriber(id: number, ws: WebSocket): boolean {
-  const session = live.get(id);
-  if (!session) return false;
-  if (session.buffer) ws.send(JSON.stringify({ type: "output", data: session.buffer }));
-  session.subscribers.add(ws);
-  ws.on("close", () => session.subscribers.delete(ws));
-  return true;
+function specFor(row: TerminalSessionRow, placement: Placement, resume: boolean): LaunchSpec {
+  return {
+    campaignId: row.campaign_id,
+    cwd: row.cwd,
+    adapterName: row.agent_adapter_name ?? undefined,
+    yolo: Boolean(row.yolo),
+    extraArgs: row.extra_args ?? undefined,
+    sessionId: row.agent_session_id!,
+    resume: resume ? { resumeSessionId: row.resume_session_id } : undefined,
+    env: placement.env,
+    nice: placement.nice,
+    owner: selfId,
+  };
 }
 
-export function writeToSession(id: number, data: string): boolean {
-  const session = live.get(id);
-  if (!session) return false;
-  session.pty.write(data);
-  return true;
-}
-
-export function resizeSession(id: number, cols: number, rows: number): boolean {
-  const session = live.get(id);
-  if (!session) return false;
-  session.pty.resize(cols, rows);
-  return true;
-}
-
-export function killSession(db: Database.Database, id: number): boolean {
-  const session = live.get(id);
-  if (!session) return false;
-  live.delete(id);
+function markFailed(db: Database.Database, id: number, message: string): void {
   db.prepare(
-    "UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE id = ?",
-  ).run(new Date().toISOString(), id);
-  broadcast(session, { type: "exit", exitCode: null });
-  session.pty.kill();
-  return true;
+    "UPDATE terminal_sessions SET status = 'exited', exited_at = ?, placement_status = 'failed', placement_note = ? WHERE id = ?",
+  ).run(new Date().toISOString(), message, id);
+}
+
+function markExited(db: Database.Database, id: number, exitCode: number | null): void {
+  db.prepare(
+    "UPDATE terminal_sessions SET status = 'exited', exit_code = ?, exited_at = ? WHERE id = ? AND status = 'active'",
+  ).run(exitCode, new Date().toISOString(), id);
+}
+
+function recordPlaced(db: Database.Database, id: number, placement: Placement, record: ptyHost.ExecRecord): boolean {
+  // Guarded on still being 'placing' and active: the user may have closed
+  // the pane while we were waking a host, and then nobody wants this PTY.
+  const result = db
+    .prepare(
+      `UPDATE terminal_sessions
+       SET host_id = ?, exec_id = ?, pid = ?, placement_status = 'placed', placed_at = ?, placement_note = ?
+       WHERE id = ? AND status = 'active' AND placement_status = 'placing'`,
+    )
+    .run(placement.hostId, record.execId, record.pid, new Date().toISOString(), `${placement.hostId} (${placement.reason})`, id);
+  return result.changes > 0;
+}
+
+async function placeAndLaunch(
+  db: Database.Database,
+  id: number,
+  req: PlacementRequest,
+  resume: boolean,
+): Promise<SpawnResult> {
+  const setNote = (message: string) =>
+    db.prepare("UPDATE terminal_sessions SET placement_note = ? WHERE id = ?").run(message, id);
+  let placement: Placement | undefined;
+  try {
+    placement = await choosePlacement(db, req, setNote);
+    const row = getRow(db, id);
+    if (!row || row.status !== "active") return { ok: false, status: 409, error: "session closed while placing" };
+    setNote(`starting on ${placement.hostId}…`);
+    const spec = specFor(row, placement, resume);
+    const record =
+      placement.hostId === selfId ? ptyHost.launch(spec) : await launchRemote(placement.url!, fleetToken(), spec);
+    if (!recordPlaced(db, id, placement, record)) {
+      if (placement.hostId === selfId) ptyHost.kill(record.execId);
+      else void killRemote(placement.url!, fleetToken(), record.execId).catch(() => {});
+      return { ok: false, status: 409, error: "session closed while placing" };
+    }
+    return { ok: true, row: getRow(db, id)! };
+  } catch (err) {
+    const message = (err as Error).message;
+    markFailed(db, id, message);
+    const status = err instanceof LaunchError ? 400 : err instanceof PlacementError ? 503 : 502;
+    return { ok: false, status, error: message };
+  } finally {
+    placement?.settle();
+  }
+}
+
+function placementRequest(req: SpawnRequest): PlacementRequest {
+  return {
+    adapterName: req.agentAdapterName ?? null,
+    origin: req.origin,
+    host: req.resumeFrom ? sessionHost(req.resumeFrom) : req.host,
+    pinned: !!req.resumeFrom,
+    requires: req.requires ?? [],
+  };
+}
+
+// Answers within SYNC_PLACEMENT_WAIT_MS. A placement still running by then
+// (waking a host) carries on in the background; the row stays 'placing' and
+// the pane's stream shows progress until it lands.
+export async function spawnSession(db: Database.Database, req: SpawnRequest): Promise<SpawnResult> {
+  const id = insertRow(db, req);
+  const placing = placeAndLaunch(db, id, placementRequest(req), !!req.resumeFrom);
+  const settled = await Promise.race([
+    placing,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), SYNC_PLACEMENT_WAIT_MS)),
+  ]);
+  if (settled === null) return { ok: true, row: getRow(db, id)! };
+  if (!settled.ok) {
+    // Fast failures keep the old contract — an error response, no row —
+    // so a bad request doesn't leave a dead pane behind.
+    db.prepare("DELETE FROM terminal_sessions WHERE id = ?").run(id);
+  }
+  return settled;
+}
+
+// Spawns on this daemon synchronously. Only for boot-time resume, which has
+// to finish before layouts are rewritten and has nowhere else to go anyway.
+function resumeHereSync(db: Database.Database, prior: TerminalSessionRow): number | null {
+  const id = insertRow(db, {
+    campaignId: prior.campaign_id,
+    cwd: prior.cwd,
+    label: prior.label ?? undefined,
+    agentAdapterName: prior.agent_adapter_name ?? undefined,
+    yolo: Boolean(prior.yolo),
+    extraArgs: prior.extra_args ?? undefined,
+    origin: selfId,
+    resumeFrom: prior,
+  });
+  const placement: Placement = { hostId: selfId, url: null, env: {}, reason: "resumed", settle: () => {} };
+  try {
+    const record = ptyHost.launch(specFor(getRow(db, id)!, placement, true));
+    recordPlaced(db, id, placement, record);
+    return id;
+  } catch {
+    // Binary missing, bad flag template, no resume support, etc.
+    db.prepare("DELETE FROM terminal_sessions WHERE id = ?").run(id);
+    return null;
+  }
+}
+
+// Mirrors exits and discovered resume ids of PTYs on this host into rows.
+// Exec ids are globally unique, so a PTY this daemon runs for a remote
+// control plane simply matches no row here.
+export function watchLocalExecs(db: Database.Database): void {
+  ptyHost.onExecEvent((event) => {
+    const row = db.prepare("SELECT id FROM terminal_sessions WHERE exec_id = ?").get(event.execId) as
+      | { id: number }
+      | undefined;
+    if (!row) return;
+    if (event.type === "exit") markExited(db, row.id, event.exitCode);
+    else db.prepare("UPDATE terminal_sessions SET resume_session_id = ? WHERE id = ?").run(event.resumeSessionId, row.id);
+  });
+}
+
+export async function killSession(db: Database.Database, row: TerminalSessionRow): Promise<void> {
+  markExited(db, row.id, null);
+  if (!row.exec_id) return;
+  const host = sessionHost(row);
+  if (host === selfId) {
+    ptyHost.kill(row.exec_id);
+    return;
+  }
+  const url = hostUrl(host);
+  // If the host is unreachable the row is still ended; its next heartbeat
+  // reaps the orphaned PTY (see reconcileHost).
+  if (url) await killRemote(url, fleetToken(), row.exec_id).catch(() => {});
 }
 
 // Unlike killSession (which stops the process but keeps the row around so
 // its scrollback stays reviewable), this permanently removes the tab — the
 // only way an already-exited session ever leaves the list.
 export function removeSession(db: Database.Database, id: number): boolean {
-  const session = live.get(id);
-  if (session) {
-    live.delete(id);
-    session.pty.kill();
-  }
-  const result = db.prepare("DELETE FROM terminal_sessions WHERE id = ?").run(id);
-  return result.changes > 0;
+  const row = getRow(db, id);
+  if (!row) return false;
+  if (row.status === "active") void killSession(db, row);
+  db.prepare("DELETE FROM terminal_sessions WHERE id = ?").run(id);
+  return true;
 }
 
 export function killAllLiveSessions(db: Database.Database): void {
-  for (const [id, session] of [...live]) {
-    live.delete(id);
-    db.prepare(
-      "UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE id = ?",
-    ).run(new Date().toISOString(), id);
-    session.pty.kill();
-  }
+  ptyHost.killAll();
+  // Remote sessions are untouched — they run on other hosts and outlive
+  // this daemon. Only rows for PTYs that just died here are ended.
+  db.prepare(
+    "UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE status = 'active' AND COALESCE(host_id, ?) = ?",
+  ).run(new Date().toISOString(), selfId, selfId);
 }
 
-// Which conversation id to feed the adapter's resumeFlag / to gate resume
-// availability on. Adapters that mint their own id and only surface it
-// post-launch (sessionIdFromWorkspaceCache set — agy) must use
-// resume_session_id specifically: agent_session_id there is Besiege's own
-// correlation id (BESIEGE_SESSION_ID), not a real conversation id, and
-// passing it to e.g. `--conversation` would resume nothing that exists.
-// Every other adapter falls back to agent_session_id, exactly as before
-// this column existed.
-export function resolveResumeConversationId(
-  adapter: AgentConfig | undefined,
-  row: Pick<TerminalSessionRow, "agent_session_id" | "resume_session_id">,
-): string | null {
-  if (adapter?.sessionIdFromWorkspaceCache) return row.resume_session_id;
-  return row.resume_session_id ?? row.agent_session_id;
+export function remapLayouts(db: Database.Database, idMap: Map<number, number | null>): void {
+  if (idMap.size === 0) return;
+  const layoutRows = db.prepare("SELECT id, layout_tree FROM terminal_layouts").all() as {
+    id: number;
+    layout_tree: string;
+  }[];
+  const updateTree = db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?");
+  for (const row of layoutRows) {
+    const tree = JSON.parse(row.layout_tree) as PaneNode;
+    if (!sessionIdsInTree(tree).some((id) => idMap.has(id))) continue;
+    updateTree.run(JSON.stringify(remapSessionIds(tree, idMap)), row.id);
+  }
 }
 
 // No PTY can survive a daemon restart (the IPty handle only ever lived in
-// this process's `live` map), so every row still marked 'active' from a
-// previous process is stale by definition. Unlike the old reap-only
-// behavior, a session on an adapter with resume support gets relaunched
-// under a new pid but the *same* agent_session_id, so the agent CLI's own
-// conversation continues (assuming that CLI persists its transcript by
-// session id — Besiege's part is just passing the right resume flag).
-// Returns old-id -> new-id (or null if not resumed) so the caller can
-// rewrite layout trees to point at the resumed sessions.
+// that process), so every row for *this* host still marked 'active' is
+// stale by definition. A session on an adapter with resume support gets
+// relaunched under the *same* agent_session_id, so the agent CLI's own
+// conversation continues. Rows on other hosts are left alone — their PTYs
+// are fine, and their hosts' heartbeats will say so.
+// Returns old-id -> new-id (or null if not resumed) for layout rewriting.
 export function resumeSessionsOnBoot(db: Database.Database): Map<number, number | null> {
   const staleRows = db
-    .prepare("SELECT * FROM terminal_sessions WHERE status = 'active'")
-    .all() as TerminalSessionRow[];
+    .prepare("SELECT * FROM terminal_sessions WHERE status = 'active' AND COALESCE(host_id, ?) = ?")
+    .all(selfId, selfId) as TerminalSessionRow[];
 
   const idMap = new Map<number, number | null>();
-  const now = new Date().toISOString();
-
   for (const row of staleRows) {
-    let resumedId: number | null = null;
-    const adapter = row.agent_adapter_name ? findAgentConfig(row.agent_adapter_name) : undefined;
-    const resumeConversationId = resolveResumeConversationId(adapter, row);
-    if (adapter?.resumeFlag && resumeConversationId) {
-      try {
-        const resumed = spawnSession(
-          db,
-          row.campaign_id,
-          row.cwd,
-          row.label ?? undefined,
-          row.agent_adapter_name ?? undefined,
-          Boolean(row.yolo),
-          row.extra_args ?? undefined,
-          row.agent_session_id ?? undefined,
-          resumeConversationId,
-        );
-        resumedId = resumed.id;
-      } catch {
-        // Binary missing, bad flag template, etc — fall through and treat
-        // this session like any other unresumable one below.
-        resumedId = null;
-      }
-    }
-    idMap.set(row.id, resumedId);
-    db.prepare("UPDATE terminal_sessions SET status = 'exited', exited_at = ? WHERE id = ?").run(now, row.id);
+    // A row that never got placed (daemon died mid-wake) has nothing to
+    // resume; one with a conversation id does.
+    const resumable = row.placement_status === "placed" && row.agent_adapter_name && row.agent_session_id;
+    markExited(db, row.id, null);
+    idMap.set(row.id, resumable ? resumeHereSync(db, row) : null);
   }
-
   return idMap;
 }
+
+async function resumeOnHost(db: Database.Database, prior: TerminalSessionRow): Promise<number | null> {
+  const id = insertRow(db, {
+    campaignId: prior.campaign_id,
+    cwd: prior.cwd,
+    label: prior.label ?? undefined,
+    agentAdapterName: prior.agent_adapter_name ?? undefined,
+    yolo: Boolean(prior.yolo),
+    extraArgs: prior.extra_args ?? undefined,
+    origin: null,
+    resumeFrom: prior,
+  });
+  const result = await placeAndLaunch(
+    db,
+    id,
+    { adapterName: prior.agent_adapter_name, origin: null, host: sessionHost(prior), pinned: true, requires: [] },
+    true,
+  );
+  if (result.ok) return id;
+  db.prepare("DELETE FROM terminal_sessions WHERE id = ?").run(id);
+  return null;
+}
+
+// Brings rows for one host in line with the snapshot it just sent: exits it
+// saw, PTYs it lost, resource peaks, and orphans nobody owns any more.
+export async function reconcileHost(db: Database.Database, hb: Heartbeat, previousBootId: string | null): Promise<void> {
+  const byExec = new Map(hb.execs.map((e) => [e.execId, e]));
+  const rows = db
+    .prepare(
+      "SELECT * FROM terminal_sessions WHERE status = 'active' AND placement_status = 'placed' AND COALESCE(host_id, ?) = ?",
+    )
+    .all(selfId, hb.hostId) as TerminalSessionRow[];
+
+  const updatePeak = db.prepare(
+    "UPDATE terminal_sessions SET peak_rss_bytes = MAX(COALESCE(peak_rss_bytes, 0), ?) WHERE id = ?",
+  );
+
+  // Exits on this daemon's own PTYs are recorded synchronously by
+  // watchLocalExecs; heartbeats only add the resource numbers.
+  if (hb.hostId === selfId) {
+    for (const row of rows) {
+      const exec = row.exec_id ? byExec.get(row.exec_id) : undefined;
+      if (exec?.rssBytes) updatePeak.run(exec.rssBytes, row.id);
+    }
+    return;
+  }
+
+  const restarted = previousBootId !== null && previousBootId !== hb.bootId;
+  const died: TerminalSessionRow[] = [];
+  const now = Date.now();
+
+  for (const row of rows) {
+    const exec = row.exec_id ? byExec.get(row.exec_id) : undefined;
+    if (exec?.status === "active") {
+      if (exec.rssBytes) updatePeak.run(exec.rssBytes, row.id);
+      if (exec.resumeSessionId && exec.resumeSessionId !== row.resume_session_id) {
+        db.prepare("UPDATE terminal_sessions SET resume_session_id = ? WHERE id = ?").run(exec.resumeSessionId, row.id);
+      }
+    } else if (exec) {
+      markExited(db, row.id, exec.exitCode);
+    } else if (restarted) {
+      markExited(db, row.id, null);
+      died.push(row);
+    } else if (now - Date.parse(row.placed_at ?? row.created_at) > LOST_SESSION_GRACE_MS) {
+      markExited(db, row.id, null);
+    }
+  }
+
+  const url = hb.url;
+  if (url) {
+    const findByExec = db.prepare("SELECT status FROM terminal_sessions WHERE exec_id = ?");
+    for (const exec of hb.execs) {
+      if (exec.owner !== selfId || exec.status !== "active" || exec.ageMs < LOST_SESSION_GRACE_MS) continue;
+      const row = findByExec.get(exec.execId) as { status: string } | undefined;
+      if (!row || row.status === "exited") void killRemote(url, fleetToken(), exec.execId).catch(() => {});
+    }
+  }
+
+  const resumable = died.filter((row) => row.agent_adapter_name && row.agent_session_id);
+  if (resumable.length === 0 && died.length === 0) return;
+
+  const idMap = new Map<number, number | null>();
+  for (const row of died) idMap.set(row.id, null);
+  for (const row of resumable) idMap.set(row.id, await resumeOnHost(db, row));
+  remapLayouts(db, idMap);
+
+  const resumedIds = [...idMap.values()].filter((v): v is number => v !== null);
+  // Points at a resumed session when there is one, so the inbox's
+  // jump-to-session lands somewhere alive.
+  const subject = resumedIds.length > 0 ? getRow(db, resumedIds[0])! : died[0];
+  db.prepare(
+    "INSERT INTO notifications (session_id, cwd, message, kind, created_at) VALUES (?, ?, ?, 'fleet', ?)",
+  ).run(
+    subject.agent_session_id ?? `fleet:${hb.hostId}`,
+    subject.cwd,
+    `${hb.hostId} restarted and took ${died.length} session(s) with it — resumed ${resumedIds.length} on ${hb.hostId}.`,
+    new Date().toISOString(),
+  );
+}
+
