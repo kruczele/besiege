@@ -1197,6 +1197,17 @@ body {
   font-weight: 400;
 }
 
+.terminal-grid-pane-host {
+  flex-shrink: 0;
+  margin-right: auto;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .terminal-grid-pane-actions {
   display: flex;
   flex-shrink: 0;

@@ -4,10 +4,12 @@ import { buildServer } from "./server.js";
 import { dbPath, internalSocketPath, pidPath, socketPath, stateDir, tcpTokenPath } from "./paths.js";
 import { getGitHubToken, syncAllActivePrs, syncPr, syncCampaign, expireStaleClaims } from "./github.js";
 import { checkHookHealth } from "./hook-health.js";
-import { killAllLiveSessions, resumeSessionsOnBoot } from "./terminals.js";
-import { remapSessionIds, sessionIdsInTree, type PaneNode } from "./layout-tree.js";
+import { killAllLiveSessions, reconcileHost, remapLayouts, resumeSessionsOnBoot, watchLocalExecs } from "./terminals.js";
 import { readOrCreateTcpToken } from "./tcp-token.js";
 import { startDispatcher } from "./dispatcher.js";
+import { hydrateHosts, selfHeartbeat } from "./fleet.js";
+import { HEARTBEAT_INTERVAL_MS, startHeartbeatLoop } from "./heartbeat.js";
+import { hostId } from "./host.js";
 
 function processIsAlive(pid: number): boolean {
   try {
@@ -42,6 +44,9 @@ async function main() {
   const db = openDb();
   db.prepare("INSERT INTO daemon_startups (started_at) VALUES (?)").run(new Date().toISOString());
 
+  watchLocalExecs(db);
+  hydrateHosts(db);
+
   const token = getGitHubToken();
   const app = await buildServer(db, token ? syncPr : null, token ? syncCampaign : null);
   await app.listen({ path: internalSocketPath });
@@ -52,22 +57,18 @@ async function main() {
   // are spawned before listen(), the hook's fire-and-forget POST gets ENOENT
   // and hook_confirmed_at stays NULL, triggering a false "hooks not wired"
   // warning 60 s later.
-  const resumeIdMap = resumeSessionsOnBoot(db);
-  if (resumeIdMap.size > 0) {
-    // Point every pane that referenced a now-stale session at whatever
-    // resumeSessionsOnBoot did with it: the resumed session's new id, or
-    // null (empty, relaunchable pane) if it couldn't be resumed.
-    const layoutRows = db.prepare("SELECT id, layout_tree FROM terminal_layouts").all() as {
-      id: number;
-      layout_tree: string;
-    }[];
-    const updateTree = db.prepare("UPDATE terminal_layouts SET layout_tree = ? WHERE id = ?");
-    for (const row of layoutRows) {
-      const tree = JSON.parse(row.layout_tree) as PaneNode;
-      if (!sessionIdsInTree(tree).some((id) => resumeIdMap.has(id))) continue;
-      updateTree.run(JSON.stringify(remapSessionIds(tree, resumeIdMap)), row.id);
-    }
-  }
+  // Points every pane that referenced a now-stale session at whatever
+  // resumeSessionsOnBoot did with it: the resumed session's new id, or null
+  // (empty, relaunchable pane) if it couldn't be resumed.
+  remapLayouts(db, resumeSessionsOnBoot(db));
+
+  // This daemon's own sessions get the same resource tracking as those on
+  // remote hosts, from a local heartbeat that never leaves the process.
+  selfHeartbeat(db);
+  const selfHeartbeatTimer = setInterval(() => {
+    const hb = selfHeartbeat(db);
+    void reconcileHost(db, hb, hb.bootId).catch(console.error);
+  }, HEARTBEAT_INTERVAL_MS);
 
   // Optional: expose this daemon over TCP (token-gated) so another machine's
   // daemon can use it as its remote peer — how the always-on box acts as the
@@ -78,8 +79,8 @@ async function main() {
   let tcpApp: Awaited<ReturnType<typeof buildServer>> | null = null;
   if (tcpPort) {
     const tcpHost = process.env.BESIEGE_TCP_HOST ?? "127.0.0.1";
-    const tcpToken = readOrCreateTcpToken();
-    tcpApp = await buildServer(db, token ? syncPr : null, token ? syncCampaign : null, tcpToken);
+    const tcpTokens = [readOrCreateTcpToken(), process.env.BESIEGE_PRIMARY_TOKEN].filter((t): t is string => !!t);
+    tcpApp = await buildServer(db, token ? syncPr : null, token ? syncCampaign : null, tcpTokens);
     await tcpApp.listen({ port: Number(tcpPort), host: tcpHost });
     console.log(`daemon also listening on tcp://${tcpHost}:${tcpPort} (token: ${tcpTokenPath})`);
   }
@@ -94,7 +95,13 @@ async function main() {
     primaryUrl: process.env.BESIEGE_PRIMARY_URL,
     primaryToken: process.env.BESIEGE_PRIMARY_TOKEN,
   });
-  console.log(`daemon dispatcher listening on ${socketPath}`);
+  console.log(`daemon dispatcher listening on ${socketPath} (host id: ${hostId})`);
+
+  // A follower reports what it's running to the primary, which is what
+  // lets the primary place sessions here and show them everywhere.
+  const heartbeat = process.env.BESIEGE_PRIMARY_URL
+    ? startHeartbeatLoop(process.env.BESIEGE_PRIMARY_URL, process.env.BESIEGE_PRIMARY_TOKEN)
+    : null;
 
   if (token) {
     console.log("GitHub token found — starting sync loop");
@@ -114,7 +121,10 @@ async function main() {
 
   const shutdown = async (signal: string) => {
     console.log(`received ${signal}, shutting down`);
+    clearInterval(selfHeartbeatTimer);
+    heartbeat?.stop();
     killAllLiveSessions(db); // don't leave orphaned zombie shells behind
+    await heartbeat?.sendFinal();
     dispatcher.close();
     await app.close();
     if (tcpApp) await tcpApp.close();

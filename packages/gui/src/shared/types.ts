@@ -62,6 +62,11 @@ export interface TerminalSession {
   yolo: boolean;
   extraArgs: string | null;
   agentSessionId: string | null;
+  // Which machine runs this session (see the daemon's fleet.yaml docs).
+  hostId: string;
+  placementStatus: "placing" | "placed" | "failed";
+  placementNote: string | null;
+  fleetPlaced: boolean;
 }
 
 // A hand-edited YAML config (agents.default.yaml + agents.local.yaml), not a

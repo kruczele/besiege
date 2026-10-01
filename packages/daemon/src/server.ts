@@ -11,6 +11,8 @@ import { registerFailureRoutes } from "./routes/failures.js";
 import { registerTerminalRoutes } from "./routes/terminals.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerLayoutRoutes } from "./routes/layouts.js";
+import { registerExecRoutes } from "./routes/exec.js";
+import { registerFleetRoutes } from "./routes/fleet.js";
 import type { syncPr, syncCampaign } from "./github.js";
 
 type SyncPrFn = typeof syncPr;
@@ -24,14 +26,17 @@ export async function buildServer(
   // as a remote peer for another one. The unix-socket instances (this
   // machine's own internal app, and historically the sole instance before
   // the dispatcher existed) stay unauthenticated, matching the existing
-  // trusted-local-access assumption.
-  authToken?: string,
+  // trusted-local-access assumption. Several are accepted on a host that
+  // is both a peer for others and a follower of a primary: its own token,
+  // and the primary's, which the primary presents when it calls /exec/*.
+  authTokens?: string[],
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
 
-  if (authToken) {
+  if (authTokens) {
+    const accepted = new Set(authTokens.map((t) => `Bearer ${t}`));
     app.addHook("onRequest", (req, reply, done) => {
-      if (req.headers.authorization !== `Bearer ${authToken}`) {
+      if (!accepted.has(req.headers.authorization ?? "")) {
         reply.code(401).send({ error: "unauthorized" });
         return;
       }
@@ -57,6 +62,8 @@ export async function buildServer(
   registerTerminalRoutes(app, db);
   registerAgentRoutes(app);
   registerLayoutRoutes(app, db);
+  registerExecRoutes(app);
+  registerFleetRoutes(app, db);
 
   return app;
 }

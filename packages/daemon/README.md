@@ -14,40 +14,126 @@ pnpm --filter daemon build   # tsc -> dist/
 pnpm --filter daemon start   # node dist/index.js
 ```
 
-## Remote peer (multi-machine setups, e.g. over Tailscale)
+## Fleet (several machines, one control plane)
 
-Every client (GUI, web UI, hooks) always talks to this machine's own
-`daemon.sock` — that never changes. In front of it sits a small dispatcher
-(`src/dispatcher.ts`) that can optionally forward everything through to
-another machine's daemon instead of serving from this machine's own DB, so a
-laptop's daemon can transparently defer to an always-on box's while it's
-reachable, and fall back to its own local DB the moment it isn't. There's no
-sync/merge of the two datasets — whichever one is currently being served is
-the sole source of truth for that moment; data written locally while the
-peer is unreachable stays local only.
+Sessions run on the machine you start them from; what they are, where they
+run, and everything else Besiege tracks lives on one always-on **control
+plane**. Any client on any machine can attach to any session, and a
+client with no compute of its own (a phone using the web UI) gets its
+sessions placed on whichever machine has room.
 
-- On the machine that should act as the shared source (the always-on box),
-  set `BESIEGE_TCP_PORT` (and `BESIEGE_TCP_HOST`, typically that machine's
-  Tailscale IP — there's no default beyond `127.0.0.1`, so exposure is
-  opt-in and explicit). This also authenticates requests: a random bearer
-  token is generated on first run and persisted to
-  `$BESIEGE_STATE_DIR/tcp-token` (`chmod 600`) — `cat` it to hand to a peer.
-  **The Tailscale network boundary alone is not treated as sufficient auth**
-  — anything that can reach the TCP listener still needs the token, since
-  the daemon can execute arbitrary shell commands.
-- On a machine that should defer to that source, set `BESIEGE_PRIMARY_URL`
-  (e.g. `http://100.x.y.z:4570`) and `BESIEGE_PRIMARY_TOKEN` (the value from
-  the primary's `tcp-token` file). This machine keeps running its own local
-  daemon/DB the whole time — it's just preferred over whenever the primary
-  answers a `/health` check (polled every ~3s, short timeout, fails over
-  immediately rather than waiting out the interval if a proxied request
-  itself errors).
-- Terminal sessions (PTYs) are spawned wherever the request actually lands —
-  so while a follower is deferring to the primary, agent shells run and keep
-  running on the primary/always-on box, not the follower.
-- Never bind `BESIEGE_TCP_HOST` beyond your own tailnet (no `0.0.0.0`, no
-  port-forwarding) — the token is defense in depth on top of the Tailscale
-  boundary, not a substitute for it.
+Every client (GUI, web UI, hooks, MCP) still only talks to this machine's
+own `daemon.sock`. In front of it a dispatcher (`src/dispatcher.ts`)
+forwards requests to the control plane while it's reachable, and falls
+back to this machine's own DB while it isn't. The two datasets are never
+merged: sessions started during an outage stay in the local DB.
+
+### Roles
+
+- **Control plane** (the always-on box): holds the DB, receives
+  heartbeats, runs the scheduler, and proxies terminal streams to whichever
+  host runs each session. Only it needs `fleet.yaml`.
+- **Host** (every other machine): runs its own daemon, which owns its PTYs
+  and serves `/exec/*`. It sends the control plane a heartbeat every 5s: CPU
+  load, available memory, and every PTY with its process tree's RSS/CPU.
+- **Client**: anything that attaches. Clients never appear in config.
+
+### Setup
+
+On the control plane:
+
+```bash
+BESIEGE_HOST_ID=mac                # optional; defaults to the hostname, lowercased, without .local
+BESIEGE_TCP_HOST=100.x.y.z         # its Tailscale IP
+BESIEGE_TCP_PORT=4570
+```
+
+A random bearer token is generated on first run at
+`$BESIEGE_STATE_DIR/tcp-token` (`chmod 600`). `cat` it to hand to the
+hosts.
+
+On every other host:
+
+```bash
+BESIEGE_HOST_ID=krukomp            # optional, as above
+BESIEGE_PRIMARY_URL=http://100.x.y.z:4570
+BESIEGE_PRIMARY_TOKEN=<control plane's tcp-token>
+BESIEGE_TCP_HOST=100.a.b.c         # this host's own Tailscale IP, so the control plane can reach /exec/*
+BESIEGE_TCP_PORT=4570
+# BESIEGE_ADVERTISE_URL=http://...  # only if the URL others should use differs from TCP_HOST:TCP_PORT
+```
+
+A host's TCP listener accepts both its own token and the control plane's.
+The control plane presents its own token when calling a host. Never bind
+`BESIEGE_TCP_HOST` beyond your tailnet (no `0.0.0.0`, no port-forwarding).
+The daemon executes arbitrary commands, and the token is defense in depth
+on top of the Tailscale boundary, not a substitute for it.
+
+### `fleet.yaml`
+
+Lives at `$BESIEGE_STATE_DIR/fleet.yaml` on the control plane (override
+with `BESIEGE_FLEET_CONFIG`). Changes are picked up on the next spawn
+without a restart. A broken edit keeps the previous config, and the error
+is reported by `GET /fleet/hosts`. See [`fleet.example.yaml`](fleet.example.yaml).
+The code knows no machine by name: a host that heartbeats but isn't listed
+gets `defaults`, and keys may be globs (`"kru*"`).
+
+Without a `fleet.yaml` and with nobody heartbeating in, a daemon places
+every session on itself, regardless of load, exactly as before fleets
+existed.
+
+### Placement
+
+When a session is spawned, the scheduler tries each step of
+`placement.order` until one gives it a host:
+
+1. **origin**: the host the request came from (sent by its dispatcher),
+   if it has capacity.
+2. **pool**: the online host with the most headroom.
+3. **wake**: every sleeping host with a `wake` method, woken in parallel.
+   The session goes to the first one that heartbeats in with capacity
+   within `wake_timeout`.
+4. **last_resort**: a host with free `last_resort.slots`, regardless of
+   load, with `last_resort.env`/`nice` applied to the session.
+
+If every step fails, the spawn returns an error naming each host it
+considered and why it couldn't be used.
+
+A host **has capacity** if, with the session's estimated cost added, its
+memory use and `load1 / cpus` both stay under `placement.limits`. That
+estimate is the average peak RSS of the adapter's last 20 sessions, or
+`default_cost` until there are at least 3 samples. Hosts with `pool: false`
+are only ever used as a last resort.
+
+A spawn request may pass `host` (force a host, still has to be online) or
+`requires: [tag, ...]` (the host needs all those `tags`). Resuming a
+session always pins it to its original host, because that's where the
+agent CLI keeps its transcript.
+
+Spawns answer within 3s. A placement that takes longer (waiting on a
+woken host) carries on in the background with `placementStatus:
+"placing"`, and the pane's stream shows its progress until it attaches.
+
+### When hosts restart
+
+- **The control plane restarts:** sessions on other hosts keep running and
+  stay attached to their rows. Its own sessions behave as before (resumed
+  after a crash).
+- **A host crashes** (its next heartbeat carries a new boot id): the
+  control plane resumes its resumable agent sessions on that same host,
+  rewrites layouts to point at them, and posts a `fleet` notification.
+- **A host shuts down cleanly:** it sends a final heartbeat first, so its
+  sessions are recorded as ended rather than lost, and nothing is resumed.
+- **A PTY no row owns any more** (killed while its host was unreachable)
+  is killed by the control plane once its host's heartbeat shows it.
+
+`GET /fleet/hosts` shows each host as `online`, `recovering` (silent for
+less than `restart_grace`) or `offline`, along with its stats and session
+count.
+
+What isn't built yet (phone access, moving sessions between hosts,
+sharing one session between several viewers, and more) is tracked in
+[`docs/fleet-roadmap.md`](../../docs/fleet-roadmap.md).
 
 ## Wiring Claude Code hooks
 
