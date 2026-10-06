@@ -240,6 +240,21 @@ export async function syncPr(db: Database.Database, prId: number): Promise<void>
     new Date().toISOString(),
     pr.id,
   );
+
+  if (state.lifecycle === "merged" || state.lifecycle === "closed") {
+    releaseClaimsForPr(db, pr.id);
+  }
+}
+
+// A PR that merges or closes is done — any claim left open on it (an agent
+// that forgot to release, or whose session died) should drop off the
+// pinned/claims board immediately rather than wait for the 5-minute
+// heartbeat expiry in expireStaleClaims.
+function releaseClaimsForPr(db: Database.Database, prId: number): void {
+  db.prepare("UPDATE pr_claims SET released_at = ? WHERE pr_id = ? AND released_at IS NULL").run(
+    new Date().toISOString(),
+    prId,
+  );
 }
 
 export async function syncCampaign(db: Database.Database, campaignId: string | number): Promise<void> {
@@ -310,6 +325,9 @@ export async function syncCampaign(db: Database.Database, campaignId: string | n
         new Date().toISOString(),
         pr.id,
       );
+      if (state.lifecycle === "merged" || state.lifecycle === "closed") {
+        releaseClaimsForPr(db, pr.id);
+      }
     }
   })();
 }
@@ -366,6 +384,9 @@ export async function syncAllActivePrs(db: Database.Database): Promise<void> {
         new Date().toISOString(),
         pr.id,
       );
+      if (state.lifecycle === "merged" || state.lifecycle === "closed") {
+        releaseClaimsForPr(db, pr.id);
+      }
     }
   })();
 }
