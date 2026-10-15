@@ -14,6 +14,21 @@ pnpm --filter daemon build   # tsc -> dist/
 pnpm --filter daemon start   # node dist/index.js
 ```
 
+## Logging
+
+`pnpm web` and `pnpm daemon:reload` send the daemon's output to
+`$BESIEGE_STATE_DIR/daemon.log` (default `~/.local/state/besiege/daemon.log`).
+
+- Requests are logged only when they fail (4xx at `warn`, 5xx at `error`) or
+  take longer than 1s (`warn`). Routine successful requests, mostly client
+  polling, are logged at `debug`.
+- `BESIEGE_LOG_LEVEL` (`fatal`, `error`, `warn`, `info`, `debug`, `trace`,
+  `silent`; default `info`) sets the level. Use `debug` to trace every
+  request.
+- When the daemon is started by those scripts and `daemon.log` is over 50 MB,
+  it is moved to `daemon.log.1` (replacing any previous one) first. The file is
+  not rotated while the daemon runs.
+
 ## Fleet (several machines, one control plane)
 
 Sessions run on the machine you start them from; what they are, where they
