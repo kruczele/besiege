@@ -33,6 +33,8 @@ Roughly in priority order.
 
 ### 1. Phone / web access to the control plane
 
+Design for the hardening and the event stream: [`mobile-access.md`](mobile-access.md).
+
 The web UI (`packages/gui/src/web`) binds `127.0.0.1` and has no auth, so
 it can't be used from a phone yet.
 
