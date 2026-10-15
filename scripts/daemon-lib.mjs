@@ -1,5 +1,5 @@
 // Shared by scripts/web.mjs and scripts/reload-daemon.mjs.
-import { existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
@@ -11,6 +11,7 @@ export const stateDir = override ?? join(xdgStateHome, "besiege");
 export const socketPath = join(stateDir, "daemon.sock");
 export const pidPath = join(stateDir, "daemon.pid");
 export const logPath = join(stateDir, "daemon.log");
+const MAX_LOG_BYTES = 50 * 1024 * 1024;
 
 // Returns the daemon's pid if a live process is holding it, else null —
 // mirrors the daemon's own acquireSingleInstanceLock() staleness check.
@@ -52,7 +53,13 @@ export async function waitFor(checkFn, { timeoutMs = 15_000, intervalMs = 200 } 
 
 // Opens (creating stateDir if needed) an append fd for a detached daemon
 // child's stdout/stderr, so its output is inspectable instead of lost.
+// An oversized log is rotated to daemon.log.1 (replacing the previous one)
+// first; nothing rotates it while the daemon runs, so it can overshoot the
+// cap until the next start.
 export function openLogFd() {
   mkdirSync(stateDir, { recursive: true });
+  if (existsSync(logPath) && statSync(logPath).size > MAX_LOG_BYTES) {
+    renameSync(logPath, `${logPath}.1`);
+  }
   return openSync(logPath, "a");
 }

@@ -18,6 +18,14 @@ import type { syncPr, syncCampaign } from "./github.js";
 type SyncPrFn = typeof syncPr;
 type SyncCampaignFn = typeof syncCampaign;
 
+const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace", "silent"];
+const SLOW_REQUEST_MS = 1000;
+
+function logLevel(): string {
+  const level = process.env.BESIEGE_LOG_LEVEL;
+  return level && LOG_LEVELS.includes(level) ? level : "info";
+}
+
 export async function buildServer(
   db: Database.Database,
   syncPrFn: SyncPrFn | null = null,
@@ -31,7 +39,27 @@ export async function buildServer(
   // and the primary's, which the primary presents when it calls /exec/*.
   authTokens?: string[],
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  // The GUI/WUI poll several endpoints per second, so Fastify's per-request
+  // lines (two per request) are replaced by the onResponse hook below, which
+  // only keeps failures and slow requests at info+. Everything else is
+  // debug, i.e. visible with BESIEGE_LOG_LEVEL=debug.
+  const app = Fastify({ logger: { level: logLevel() }, disableRequestLogging: true });
+
+  // disableRequestLogging also silences Fastify's own logging of errors
+  // thrown by handlers, so log those (with the stack) here.
+  app.addHook("onError", (req, _reply, err, done) => {
+    if (((err as { statusCode?: number }).statusCode ?? 500) >= 500) req.log.error({ err }, "request errored");
+    done();
+  });
+
+  app.addHook("onResponse", (req, reply, done) => {
+    const { statusCode } = reply;
+    const responseTime = Math.round(reply.elapsedTime);
+    const level =
+      statusCode >= 500 ? "error" : statusCode >= 400 || responseTime > SLOW_REQUEST_MS ? "warn" : "debug";
+    req.log[level]({ req: req, res: reply, responseTime }, "request completed");
+    done();
+  });
 
   if (authTokens) {
     const accepted = new Set(authTokens.map((t) => `Bearer ${t}`));
