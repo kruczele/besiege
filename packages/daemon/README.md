@@ -146,6 +146,34 @@ woken host) carries on in the background with `placementStatus:
 less than `restart_grace`) or `offline`, along with its stats and session
 count.
 
+### Shared services
+
+A service listening on one machine's loopback (say `localhost:1234` on
+`krukoffice`) can be reached at `localhost:1234` on the other machines.
+Services are added, disabled and removed from the **Fleet** tab (or
+`POST/PATCH/DELETE /fleet/services`), not from `fleet.yaml`: each is a row
+in the control plane's DB with a source host and port, the hosts it's
+exposed on (default: every other host), and an optional different port
+there if the same one is taken.
+
+Nothing is configured per host. The reply to each heartbeat tells a host
+which ports to listen on and which of its own ports it may serve, and the
+next heartbeat reports whether each listener bound (`listening`, `error`
+with the reason, or `pending`), which the Fleet tab shows under "Reachable
+here".
+
+The data path goes daemon to daemon: the exposing host listens on
+`127.0.0.1` only, and each connection opens a websocket to the source
+daemon's `/tunnel/:port`, which dials `127.0.0.1:port` there. So a service
+that only binds loopback works, it is never put on the tailnet itself, and
+the source daemon refuses (403) any port that isn't a shared service
+enabled for it. The tunnel uses the same token as everything else between
+daemons. Traffic is TCP, so anything that speaks TCP works, but it is not
+encrypted beyond what the tailnet already does.
+
+A host whose daemon is restarted, or loses the control plane, keeps the
+listeners it last had; they are re-synced on the next heartbeat.
+
 What isn't built yet (phone access, moving sessions between hosts,
 sharing one session between several viewers, and more) is tracked in
 [`docs/fleet-roadmap.md`](../../docs/fleet-roadmap.md).

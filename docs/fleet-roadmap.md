@@ -26,6 +26,9 @@ See the "Fleet" section of [`packages/daemon/README.md`](../packages/daemon/READ
 - Terminal streams are proxied by the control plane, or attached locally
   when the viewer is on the session's own host.
 - GUI panes show which host a session runs on.
+- Shared services: a loopback port on one host can be exposed on the
+  others' loopback, managed from the Fleet tab, which lists each host's
+  agents, the services it shares, and the ones reachable from it.
 
 ## Still to build
 
@@ -125,8 +128,8 @@ most on hosts whose daemon gets upgraded often.
 
 ### 8. Fleet UI
 
-- A hosts view built on `GET /fleet/hosts`: status, load and memory,
-  sessions per host, `fleet.yaml` errors, and a manual wake button.
+- Still missing from the hosts view in the Fleet tab: a manual wake
+  button, and `fleet.yaml` tags and pool membership.
 - An optional host picker in the pane launcher (`host` / `requires` on the
   spawn request already exist in the API).
 - The TUI is unchanged so far. It ignores the new fields.

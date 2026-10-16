@@ -8,6 +8,8 @@ import type {
   ConfigRule,
   DaemonHealth,
   DaemonResult,
+  FleetOverview,
+  FleetServiceInput,
   Notification,
   PaneNode,
   PrGridRow,
@@ -20,6 +22,13 @@ export type { DaemonResult };
 
 const api = {
   getDaemonHealth: (): Promise<DaemonResult<DaemonHealth>> => ipcRenderer.invoke("daemon:health"),
+
+  listFleet: (): Promise<DaemonResult<FleetOverview>> => ipcRenderer.invoke("fleet:list"),
+  createFleetService: (input: FleetServiceInput): Promise<DaemonResult<unknown>> =>
+    ipcRenderer.invoke("fleet:create-service", input),
+  setFleetServiceEnabled: (id: number, enabled: boolean): Promise<DaemonResult<unknown>> =>
+    ipcRenderer.invoke("fleet:update-service", id, { enabled }),
+  deleteFleetService: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("fleet:delete-service", id),
 
   listConfigRules: (): Promise<DaemonResult<ConfigRule[]>> => ipcRenderer.invoke("config:list"),
   createConfigRule: (pattern: string, context: string, besiegeOnly?: boolean): Promise<DaemonResult<ConfigRule>> =>

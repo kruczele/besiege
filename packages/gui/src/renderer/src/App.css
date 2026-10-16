@@ -1398,3 +1398,148 @@ a.pane-pinned-pr-chip:hover {
 .pane-launcher-buttons button:hover {
   background: var(--surface-active-hover);
 }
+
+/* ── Fleet ── */
+
+.fleet-host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.7rem 0.8rem;
+}
+
+.fleet-host-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fleet-host-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.fleet-host-status {
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+
+.fleet-host-stats {
+  font-size: 0.72rem;
+  color: var(--text-disabled);
+}
+
+.fleet-badge {
+  font-size: 0.68rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
+.fleet-section-title {
+  margin: 0.4rem 0 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.fleet-host .claim-card {
+  background: var(--bg);
+}
+
+.fleet-host .empty-hint {
+  margin: 0;
+}
+
+.fleet-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.fleet-row {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+}
+
+.fleet-row-off {
+  opacity: 0.6;
+}
+
+.fleet-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.fleet-row-name {
+  font-weight: 600;
+}
+
+.fleet-row code {
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.fleet-row-sub {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 0.1rem;
+}
+
+.fleet-row-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.fleet-row-actions button,
+.fleet-add-button {
+  background: var(--surface-active);
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.fleet-row-actions button:hover:not(:disabled),
+.fleet-add-button:hover {
+  background: var(--surface-active-hover);
+}
+
+.fleet-row-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fleet-add-button {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.fleet-add-ports {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.fleet-add-ports input {
+  flex: 1;
+  min-width: 0;
+}

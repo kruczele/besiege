@@ -68,6 +68,11 @@ function openStream(id: number): void {
 export const webApi: Api = {
   getDaemonHealth: () => wrap(daemon.fetchDaemonHealth),
 
+  listFleet: () => wrap(daemon.fetchFleet),
+  createFleetService: (input) => wrap(() => daemon.createFleetService(input)),
+  setFleetServiceEnabled: (id, enabled) => wrap(() => daemon.updateFleetService(id, { enabled })),
+  deleteFleetService: (id) => wrap(() => daemon.deleteFleetService(id)),
+
   listConfigRules: () => wrap(daemon.fetchConfigRules),
   createConfigRule: (pattern, context, besiegeOnly) =>
     wrap(() => daemon.createConfigRule(pattern, context, besiegeOnly)),

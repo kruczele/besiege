@@ -715,6 +715,26 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    name: "0039_fleet_services",
+    sql: `
+      -- A service listening on loopback of one machine that other fleet
+      -- machines reach at their own localhost (see services.ts). Kept in
+      -- the DB, not fleet.yaml, because it's edited from the Fleet tab.
+      CREATE TABLE fleet_services (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        host_id TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        -- JSON array of host ids, or NULL for every other host.
+        expose_on TEXT,
+        -- Port to listen on where it's exposed; NULL means the same as port.
+        local_port INTEGER,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 // Pre-0031, a split was a binary { dir, ratio, a, b } node (nesting two
