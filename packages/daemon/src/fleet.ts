@@ -16,6 +16,7 @@ import { buildHeartbeat, type Heartbeat } from "./heartbeat.js";
 import { hostId as selfId } from "./host.js";
 import type { HostStats } from "./host-stats.js";
 import { wakeRemote } from "./remote-exec.js";
+import { exposedLocalPort, exposesOn, listServices, relayStatusesFor, type RelayState } from "./services.js";
 import { readOrCreateTcpToken } from "./tcp-token.js";
 import { performWake } from "./wake.js";
 
@@ -351,11 +352,75 @@ export interface HostView {
   tags: string[];
   wake: string;
   lastResortSlots: number | null;
+  // Agent sessions running here.
+  agents: HostAgent[];
+  // Services on this machine that other machines can reach.
+  services: HostService[];
+  // Other machines' services reachable from this one's localhost.
+  exposed: HostExposure[];
+}
+
+export interface HostAgent {
+  sessionId: number;
+  campaignId: number;
+  label: string | null;
+  cwd: string;
+  adapter: string;
+  createdAt: string;
+}
+
+export interface HostService {
+  id: number;
+  name: string;
+  port: number;
+  enabled: boolean;
+  // null: every other host.
+  exposeOn: string[] | null;
+  localPort: number | null;
+}
+
+export interface HostExposure {
+  serviceId: number;
+  name: string;
+  sourceHost: string;
+  localPort: number;
+  // "offline" when this machine isn't heartbeating, so it can't be asked.
+  state: RelayState | "offline";
+  error: string | null;
+}
+
+function agentsOn(db: Database.Database, id: string): HostAgent[] {
+  const rows = db
+    .prepare(
+      `SELECT id, campaign_id, label, cwd, agent_adapter_name, created_at FROM terminal_sessions
+       WHERE status = 'active' AND placement_status = 'placed' AND agent_adapter_name IS NOT NULL
+         AND COALESCE(host_id, ?) = ? ORDER BY id ASC`,
+    )
+    .all(selfId, id) as {
+    id: number;
+    campaign_id: number;
+    label: string | null;
+    cwd: string;
+    agent_adapter_name: string;
+    created_at: string;
+  }[];
+  return rows.map((r) => ({
+    sessionId: r.id,
+    campaignId: r.campaign_id,
+    label: r.label,
+    cwd: r.cwd,
+    adapter: r.agent_adapter_name,
+    createdAt: r.created_at,
+  }));
 }
 
 export function listHosts(db: Database.Database): HostView[] {
   const config = loadFleetConfig();
-  return knownHostIds(config).map((id) => {
+  const services = listServices(db);
+  // Hosts named only by a shared service still get a row, so a service
+  // pointed at a machine that hasn't heartbeated yet is visible.
+  const ids = [...new Set([...knownHostIds(config), ...services.flatMap((s) => [s.hostId, ...(s.exposeOn ?? [])])])];
+  return ids.map((id) => {
     const hc = hostConfig(config, id);
     const state = hosts.get(id) ?? null;
     const since = state ? Date.now() - state.lastSeen : Infinity;
@@ -372,6 +437,24 @@ export function listHosts(db: Database.Database): HostView[] {
       tags: hc.tags,
       wake: hc.wake.method,
       lastResortSlots: hc.lastResort?.slots ?? null,
+      agents: agentsOn(db, id),
+      services: services
+        .filter((s) => s.hostId === id)
+        .map((s) => ({ id: s.id, name: s.name, port: s.port, enabled: s.enabled, exposeOn: s.exposeOn, localPort: s.localPort })),
+      exposed: services
+        .filter((s) => exposesOn(s, id))
+        .map((s) => {
+          const reported = relayStatusesFor(id).find((r) => r.serviceId === s.id);
+          const online = isOnline(id, config);
+          return {
+            serviceId: s.id,
+            name: s.name,
+            sourceHost: s.hostId,
+            localPort: exposedLocalPort(s),
+            state: !online ? "offline" : (reported?.state ?? "pending"),
+            error: reported?.error ?? null,
+          };
+        }),
     };
   });
 }

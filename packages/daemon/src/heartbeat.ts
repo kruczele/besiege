@@ -5,6 +5,7 @@
 import { bootId, hostId } from "./host.js";
 import { hostStats, processTreeUsage, type HostStats } from "./host-stats.js";
 import { listExecs, type ExecRecord } from "./pty-host.js";
+import { applyAssignments, relayStatuses, type Assignments, type RelayStatus } from "./services.js";
 
 export const HEARTBEAT_INTERVAL_MS = 5000;
 
@@ -24,6 +25,8 @@ export interface Heartbeat {
   url: string | null;
   stats: HostStats;
   execs: HeartbeatExec[];
+  // What this host's shared-service listeners are doing (see services.ts).
+  relays: RelayStatus[];
 }
 
 export function advertisedUrl(): string | null {
@@ -49,11 +52,12 @@ export function buildHeartbeat(): Heartbeat {
       rssBytes: usage.get(e.pid)?.rssBytes ?? null,
       cpuPercent: usage.get(e.pid)?.cpuPercent ?? null,
     })),
+    relays: relayStatuses(),
   };
 }
 
 async function send(primaryUrl: string, token: string | undefined, timeoutMs: number): Promise<void> {
-  await fetch(new URL("/fleet/heartbeat", primaryUrl), {
+  const res = await fetch(new URL("/fleet/heartbeat", primaryUrl), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -62,6 +66,12 @@ async function send(primaryUrl: string, token: string | undefined, timeoutMs: nu
     body: JSON.stringify(buildHeartbeat()),
     signal: AbortSignal.timeout(timeoutMs),
   });
+  // The reply says which shared services this host should serve and expose.
+  // An older control plane answers 204 with nothing to apply.
+  if (res.status === 200) {
+    const body = (await res.json()) as { assignments?: Assignments };
+    if (body.assignments) applyAssignments(body.assignments);
+  }
 }
 
 // Runs on every daemon configured with BESIEGE_PRIMARY_URL. Failures are

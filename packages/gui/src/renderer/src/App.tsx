@@ -21,6 +21,8 @@ import type {
   ConfigRule,
   DaemonHealth,
   DaemonResult,
+  FleetHost,
+  FleetOverview,
   Notification,
   PrGridRow,
   TaskDefinition,
@@ -36,10 +38,10 @@ type Tab = "campaigns" | "live" | "rules";
 
 // Display labels only — internal tab/component names are unchanged so this
 // is a pure cosmetic rename, not a functional split.
-const TAB_LABEL: Record<Tab, string> = { campaigns: "Campaigns", live: "Army", rules: "Edicts" };
+const TAB_LABEL: Record<Tab, string> = { campaigns: "Campaigns", live: "Fleet", rules: "Edicts" };
 const TAB_HELPTEXT: Record<Tab, string> = {
   campaigns: "Coordinate multi-repo initiatives and track their progress from start to finish.",
-  live: "See your agents, what they're working on, and where they need you.",
+  live: "See each machine's agents and the services it shares with the rest of the fleet.",
   rules: "Define standing rules and context that guide your agents.",
 };
 
@@ -1117,11 +1119,13 @@ function NotificationCard({
   );
 }
 
-// ── Live board ────────────────────────────────────────────────────────────────
+// ── Fleet ─────────────────────────────────────────────────────────────────────
 
-// The "Army" tab — active agents only. Notifications used to be duplicated
-// here as "Waiting on you", but the always-visible Inbox covers that
-// completely now, so this is just the one list.
+// The "Fleet" tab: one card per machine, with the agents running on it and
+// the services it shares with the rest of the fleet. PR claims for the
+// focused campaign stay underneath, since they're what ties an agent to the
+// work it's doing. Notifications used to be duplicated here as "Waiting on
+// you", but the always-visible Inbox covers that completely now.
 function LivePanel({
   activeCampaignId,
   onJump,
@@ -1132,26 +1136,36 @@ function LivePanel({
   titles: Record<number, string>;
 }) {
   const selectedId = activeCampaignId;
+  const [fleet, setFleet] = useState<FleetOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [claims, setClaims] = useState<ActiveClaim[]>([]);
-  const [runningAgents, setRunningAgents] = useState<TerminalSession[]>([]);
+
+  const reloadFleet = async () => {
+    const res = await window.api.listFleet();
+    if (res.ok) {
+      setFleet(res.result);
+      setError(null);
+    } else {
+      setError(res.error);
+    }
+  };
 
   useEffect(() => {
-    if (selectedId === null) return;
     let cancelled = false;
 
     const poll = async () => {
-      const [claimsRes, terminalsRes] = await Promise.all([
-        window.api.listCampaignClaims(selectedId),
-        window.api.listTerminals(selectedId),
+      const [fleetRes, claimsRes] = await Promise.all([
+        window.api.listFleet(),
+        selectedId === null ? null : window.api.listCampaignClaims(selectedId),
       ]);
       if (cancelled) return;
-      if (claimsRes.ok) setClaims(claimsRes.result);
-      // Shows up here purely from being spawned with an agent adapter — no
-      // claim required, so a pane-launched agent is visible immediately
-      // instead of only after (if ever) it calls the claim_pr MCP tool.
-      if (terminalsRes.ok) {
-        setRunningAgents(terminalsRes.result.filter((s) => s.status === "active" && s.agentAdapterName !== null));
+      if (fleetRes.ok) {
+        setFleet(fleetRes.result);
+        setError(null);
+      } else {
+        setError(fleetRes.error);
       }
+      if (claimsRes?.ok) setClaims(claimsRes.result);
     };
 
     poll();
@@ -1174,54 +1188,259 @@ function LivePanel({
     }
   };
 
+  const hostIds = fleet?.hosts.map((h) => h.hostId) ?? [];
+
   return (
     <div className="panel">
-      {claims.length === 0 && runningAgents.length === 0 ? (
+      {error && <p className="status status-down">{error}</p>}
+      {fleet === null && !error && <p className="status status-pending">Loading…</p>}
+      {fleet?.configError && <p className="status status-down">fleet.yaml: {fleet.configError}</p>}
+      {fleet?.hosts.map((host) => (
+        <FleetHostCard
+          key={host.hostId}
+          host={host}
+          controlPlane={host.hostId === fleet.controlPlane}
+          hostIds={hostIds}
+          titles={titles}
+          onJump={onJump}
+          onChanged={reloadFleet}
+        />
+      ))}
+      {claims.length > 0 && (
+        <>
+          <h3 className="fleet-section-title">Claimed PRs</h3>
+          <ul className="claim-list">
+            {claims.map((c) => {
+              const session = sessionsForClaims[c.sessionId];
+              return (
+                <li
+                  key={`claim-${c.id}`}
+                  className={`claim-card ${session ? "clickable" : ""}`}
+                  onClick={session ? () => onJump(session.campaignId, session.id) : undefined}
+                >
+                  <div className="c-repo">{c.repoName}</div>
+                  <div className="c-step">
+                    {c.stepName ?? "no step"} · {c.lifecycle}
+                  </div>
+                  {c.note && <div className="c-note">{c.note}</div>}
+                  <div className="c-agent-row">
+                    <div className="c-agent">
+                      {c.agentId} · {elapsed(c.claimedAt)} ago
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        release(c.prId);
+                      }}
+                    >
+                      Release
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function hostLoad(stats: NonNullable<FleetHost["stats"]>) {
+  const mem = Math.round(((stats.memTotalBytes - stats.memAvailableBytes) / stats.memTotalBytes) * 100);
+  return `load ${stats.load1.toFixed(1)}/${stats.cpus} · mem ${mem}%`;
+}
+
+function FleetHostCard({
+  host,
+  controlPlane,
+  hostIds,
+  titles,
+  onJump,
+  onChanged,
+}: {
+  host: FleetHost;
+  controlPlane: boolean;
+  hostIds: string[];
+  titles: Record<number, string>;
+  onJump: (campaignId: number, terminalId: number) => void;
+  onChanged: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [port, setPort] = useState("");
+  const [localPort, setLocalPort] = useState("");
+  // Machines left unticked; empty means "every other machine", which also
+  // covers ones that join the fleet later.
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  const others = hostIds.filter((id) => id !== host.hostId);
+  const chosen = others.filter((id) => !skipped.has(id));
+  const portNumber = Number(port);
+  const localPortNumber = Number(localPort);
+  const valid =
+    name.trim() !== "" &&
+    Number.isInteger(portNumber) &&
+    portNumber >= 1 &&
+    portNumber <= 65535 &&
+    (localPort === "" || (Number.isInteger(localPortNumber) && localPortNumber >= 1 && localPortNumber <= 65535)) &&
+    chosen.length > 0;
+
+  const run = async (call: () => Promise<DaemonResult<unknown>>) => {
+    const res = await call();
+    if (!res.ok) setError(res.error);
+    onChanged();
+    return res.ok;
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const ok = await run(() =>
+      window.api.createFleetService({
+        name: name.trim(),
+        host_id: host.hostId,
+        port: portNumber,
+        expose_on: skipped.size === 0 ? null : chosen,
+        local_port: localPort === "" ? null : localPortNumber,
+      }),
+    );
+    if (!ok) return;
+    setAdding(false);
+    setName("");
+    setPort("");
+    setLocalPort("");
+    setSkipped(new Set());
+  };
+
+  return (
+    <div className="fleet-host">
+      <div className="fleet-host-header">
+        <span className="fleet-host-name">{host.hostId}</span>
+        {controlPlane && <span className="fleet-badge">control plane</span>}
+        <span
+          className={`fleet-host-status ${host.status === "online" ? "status-up" : host.status === "offline" ? "status-down" : "status-pending"}`}
+        >
+          {host.status}
+        </span>
+      </div>
+      {host.stats && host.status === "online" && <div className="fleet-host-stats">{hostLoad(host.stats)}</div>}
+
+      <h3 className="fleet-section-title">Agents</h3>
+      {host.agents.length === 0 ? (
         <p className="empty-hint">No agents running.</p>
       ) : (
         <ul className="claim-list">
-          {claims.map((c) => {
-            const session = sessionsForClaims[c.sessionId];
-            return (
-              <li
-                key={`claim-${c.id}`}
-                className={`claim-card ${session ? "clickable" : ""}`}
-                onClick={session ? () => onJump(session.campaignId, session.id) : undefined}
-              >
-                <div className="c-repo">{c.repoName}</div>
-                <div className="c-step">
-                  {c.stepName ?? "no step"} · {c.lifecycle}
-                </div>
-                {c.note && <div className="c-note">{c.note}</div>}
-                <div className="c-agent-row">
-                  <div className="c-agent">
-                    {c.agentId} · {elapsed(c.claimedAt)} ago
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      release(c.prId);
-                    }}
-                  >
-                    Release
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-          {/* Running from a pane launch, not (yet, or ever) claiming a
-              specific PR — shown purely because the process is alive, no
-              cooperation from the agent required. May overlap with a claim
-              above once/if it does self-claim; not worth correlating the
-              two just to de-duplicate. */}
-          {runningAgents.map((s) => (
-            <li key={`session-${s.id}`} className="claim-card clickable" onClick={() => onJump(s.campaignId, s.id)}>
-              <div className="c-repo">{titles[s.id] ?? s.label ?? s.agentAdapterName}</div>
-              <div className="c-step">{s.cwd}</div>
-              <div className="c-agent">running · {elapsed(s.createdAt)}</div>
+          {host.agents.map((a) => (
+            <li key={a.sessionId} className="claim-card clickable" onClick={() => onJump(a.campaignId, a.sessionId)}>
+              <div className="c-repo">{titles[a.sessionId] ?? a.label ?? a.adapter}</div>
+              <div className="c-step">{a.cwd}</div>
+              <div className="c-agent">
+                {a.adapter} · {elapsed(a.createdAt)}
+              </div>
             </li>
           ))}
         </ul>
+      )}
+
+      <h3 className="fleet-section-title">Shared from here</h3>
+      {host.services.length === 0 && !adding && <p className="empty-hint">Nothing shared.</p>}
+      <ul className="fleet-rows">
+        {host.services.map((svc) => (
+          <li key={svc.id} className={`fleet-row ${svc.enabled ? "" : "fleet-row-off"}`}>
+            <div className="fleet-row-main">
+              <span className="fleet-row-name">{svc.name}</span>
+              <code>
+                :{svc.port}
+                {svc.localPort !== null && svc.localPort !== svc.port ? ` → :${svc.localPort}` : ""}
+              </code>
+            </div>
+            <div className="fleet-row-sub">
+              {svc.enabled ? "to" : "off · was to"} {svc.exposeOn === null ? "every other machine" : svc.exposeOn.join(", ")}
+            </div>
+            <div className="fleet-row-actions">
+              <button onClick={() => run(() => window.api.setFleetServiceEnabled(svc.id, !svc.enabled))}>
+                {svc.enabled ? "Disable" : "Enable"}
+              </button>
+              <button onClick={() => run(() => window.api.deleteFleetService(svc.id))}>Delete</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {adding ? (
+        <form className="rule-form fleet-add-form" onSubmit={submit}>
+          <input placeholder="name" value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="fleet-add-ports">
+            <input
+              placeholder="port on this machine"
+              inputMode="numeric"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+            />
+            <input
+              placeholder={`port there (${port || "same"})`}
+              inputMode="numeric"
+              value={localPort}
+              onChange={(e) => setLocalPort(e.target.value)}
+            />
+          </div>
+          {others.length === 0 ? (
+            <p className="empty-hint">No other machines in the fleet yet.</p>
+          ) : (
+            others.map((id) => (
+              <label key={id} className="rule-besiege-only">
+                <input
+                  type="checkbox"
+                  checked={!skipped.has(id)}
+                  onChange={(e) => {
+                    const next = new Set(skipped);
+                    if (e.target.checked) next.delete(id);
+                    else next.add(id);
+                    setSkipped(next);
+                  }}
+                />
+                Reachable from {id}
+              </label>
+            ))
+          )}
+          <div className="fleet-row-actions">
+            <button type="submit" disabled={!valid}>
+              Share
+            </button>
+            <button type="button" onClick={() => setAdding(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button className="fleet-add-button" onClick={() => setAdding(true)}>
+          <Plus size={12} /> Share a service
+        </button>
+      )}
+      {error && <p className="status status-down">{error}</p>}
+
+      {host.exposed.length > 0 && (
+        <>
+          <h3 className="fleet-section-title">Reachable here</h3>
+          <ul className="fleet-rows">
+            {host.exposed.map((x) => (
+              <li key={x.serviceId} className="fleet-row">
+                <div className="fleet-row-main">
+                  <span className="fleet-row-name">{x.name}</span>
+                  <code>localhost:{x.localPort}</code>
+                </div>
+                <div className="fleet-row-sub">
+                  from {x.sourceHost} ·{" "}
+                  <span className={x.state === "listening" ? "status-up" : x.state === "error" ? "status-down" : ""}>
+                    {x.state}
+                  </span>
+                  {x.error && <span className="status-down"> · {x.error}</span>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

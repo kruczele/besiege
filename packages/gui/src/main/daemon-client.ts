@@ -9,6 +9,9 @@ import type {
   ConfigRule,
   DaemonHealth,
   FailureSignature,
+  FleetOverview,
+  FleetService,
+  FleetServiceInput,
   Notification,
   PaneNode,
   Pr,
@@ -29,6 +32,9 @@ export type {
   ConfigRule,
   DaemonHealth,
   FailureSignature,
+  FleetOverview,
+  FleetService,
+  FleetServiceInput,
   Notification,
   Pr,
   PrClaim,
@@ -77,6 +83,13 @@ function callDaemon<T>(method: "GET" | "POST" | "DELETE" | "PATCH", path: string
 export const fetchDaemonHealth = () => callDaemon<DaemonHealth>("GET", "/health");
 
 export const fetchConfigRules = () => callDaemon<ConfigRule[]>("GET", "/config/rules");
+
+export const fetchFleet = () => callDaemon<FleetOverview>("GET", "/fleet/hosts");
+export const createFleetService = (input: FleetServiceInput) =>
+  callDaemon<unknown>("POST", "/fleet/services", input);
+export const updateFleetService = (id: number, fields: Partial<{ enabled: boolean }>) =>
+  callDaemon<unknown>("PATCH", `/fleet/services/${id}`, fields);
+export const deleteFleetService = (id: number) => callDaemon<void>("DELETE", `/fleet/services/${id}`);
 
 export const createConfigRule = (pattern: string, context: string, besiegeOnly?: boolean) =>
   callDaemon<ConfigRule>("POST", "/config/rules", { pattern, context, besiege_only: besiegeOnly });

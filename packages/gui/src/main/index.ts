@@ -7,11 +7,13 @@ import {
   unarchiveCampaign,
   createCampaign,
   createConfigRule,
+  createFleetService,
   createLayout,
   createStep,
   createTerminal,
   deleteCampaign,
   deleteConfigRule,
+  deleteFleetService,
   deleteLayout,
   deleteStep,
   deleteTerminal,
@@ -21,6 +23,7 @@ import {
   fetchCampaignPrs,
   fetchCampaigns,
   fetchConfigRules,
+  fetchFleet,
   fetchDaemonHealth,
   createTask,
   fetchLayouts,
@@ -37,13 +40,14 @@ import {
   triggerCampaignSync,
   updateCampaign,
   updateConfigRule,
+  updateFleetService,
   updateLayout,
   updateStep,
   updateTask,
   deleteTask,
 } from "./daemon-client.js";
 import * as terminalBridge from "./terminal-bridge.js";
-import type { PaneNode } from "../shared/types.js";
+import type { FleetServiceInput, PaneNode } from "../shared/types.js";
 
 const icon = nativeImage.createFromPath(join(__dirname, "../../resources/icon.png"));
 
@@ -156,6 +160,10 @@ daemonHandle("config:create", (pattern: string, context: string, besiegeOnly?: b
 );
 daemonHandle("config:update", (id: number, fields: Record<string, unknown>) => updateConfigRule(id, fields));
 daemonHandle("config:delete", (id: number) => deleteConfigRule(id));
+daemonHandle("fleet:list", fetchFleet);
+daemonHandle("fleet:create-service", (input: FleetServiceInput) => createFleetService(input));
+daemonHandle("fleet:update-service", (id: number, fields: { enabled?: boolean }) => updateFleetService(id, fields));
+daemonHandle("fleet:delete-service", (id: number) => deleteFleetService(id));
 daemonHandle("notifications:list", (unacknowledgedOnly: boolean) =>
   fetchNotifications(unacknowledgedOnly),
 );

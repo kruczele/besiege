@@ -220,3 +220,65 @@ export interface FailureSignature {
   createdAt: string;
   updatedAt: string;
 }
+
+// One machine in the fleet, as GET /fleet/hosts describes it. Mirrored from
+// the daemon's HostView (fleet.ts), which owns the shape.
+export interface FleetHost {
+  hostId: string;
+  self: boolean;
+  status: "online" | "recovering" | "offline";
+  lastSeenAt: string | null;
+  stats: {
+    cpus: number;
+    load1: number;
+    memTotalBytes: number;
+    memAvailableBytes: number;
+  } | null;
+  agents: FleetAgent[];
+  // Services on this machine that other machines can reach.
+  services: FleetService[];
+  // Other machines' services reachable from this one's localhost.
+  exposed: FleetExposure[];
+}
+
+export interface FleetAgent {
+  sessionId: number;
+  campaignId: number;
+  label: string | null;
+  cwd: string;
+  adapter: string;
+  createdAt: string;
+}
+
+export interface FleetService {
+  id: number;
+  name: string;
+  port: number;
+  enabled: boolean;
+  // null: every other machine.
+  exposeOn: string[] | null;
+  localPort: number | null;
+}
+
+export interface FleetExposure {
+  serviceId: number;
+  name: string;
+  sourceHost: string;
+  localPort: number;
+  state: "pending" | "listening" | "error" | "offline";
+  error: string | null;
+}
+
+export interface FleetOverview {
+  controlPlane: string;
+  configError: string | null;
+  hosts: FleetHost[];
+}
+
+export interface FleetServiceInput {
+  name: string;
+  host_id: string;
+  port: number;
+  expose_on: string[] | null;
+  local_port: number | null;
+}

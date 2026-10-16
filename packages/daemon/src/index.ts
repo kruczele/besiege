@@ -7,7 +7,8 @@ import { checkHookHealth } from "./hook-health.js";
 import { killAllLiveSessions, reconcileHost, remapLayouts, resumeSessionsOnBoot, watchLocalExecs } from "./terminals.js";
 import { readOrCreateTcpToken } from "./tcp-token.js";
 import { startDispatcher } from "./dispatcher.js";
-import { hydrateHosts, selfHeartbeat } from "./fleet.js";
+import { hostUrl, hydrateHosts, selfHeartbeat } from "./fleet.js";
+import { applyAssignments, assignmentsFor, closeRelays } from "./services.js";
 import { HEARTBEAT_INTERVAL_MS, startHeartbeatLoop } from "./heartbeat.js";
 import { hostId } from "./host.js";
 
@@ -64,9 +65,18 @@ async function main() {
 
   // This daemon's own sessions get the same resource tracking as those on
   // remote hosts, from a local heartbeat that never leaves the process.
-  selfHeartbeat(db);
-  const selfHeartbeatTimer = setInterval(() => {
+  // The control plane also applies its own share of the fleet's shared
+  // services here; a follower is told what to do by the reply to its real
+  // heartbeat instead.
+  const isControlPlane = !process.env.BESIEGE_PRIMARY_URL;
+  const tick = () => {
     const hb = selfHeartbeat(db);
+    if (isControlPlane) applyAssignments(assignmentsFor(db, hostId, hostUrl));
+    return hb;
+  };
+  tick();
+  const selfHeartbeatTimer = setInterval(() => {
+    const hb = tick();
     void reconcileHost(db, hb, hb.bootId).catch(console.error);
   }, HEARTBEAT_INTERVAL_MS);
 
@@ -123,6 +133,7 @@ async function main() {
     console.log(`received ${signal}, shutting down`);
     clearInterval(selfHeartbeatTimer);
     heartbeat?.stop();
+    closeRelays();
     killAllLiveSessions(db); // don't leave orphaned zombie shells behind
     await heartbeat?.sendFinal();
     dispatcher.close();
