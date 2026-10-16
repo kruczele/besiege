@@ -9,11 +9,18 @@ import {
   createService,
   deleteService,
   getService,
+  listServices,
   parseServiceInput,
+  slugOf,
   recordRelayStatuses,
   updateService,
 } from "../services.js";
 import { reconcileHost } from "../terminals.js";
+
+// Names become URL segments (/s/<slug>/), so two services can't share one.
+function slugTaken(db: Database.Database, name: string, exceptId?: number): boolean {
+  return listServices(db).some((s) => s.id !== exceptId && slugOf(s.name) === slugOf(name));
+}
 
 export function registerFleetRoutes(app: FastifyInstance, db: Database.Database) {
   app.post<{ Body: Heartbeat }>("/fleet/heartbeat", async (req, reply) => {
@@ -46,6 +53,10 @@ export function registerFleetRoutes(app: FastifyInstance, db: Database.Database)
       reply.code(400);
       return input;
     }
+    if (slugTaken(db, input.name)) {
+      reply.code(409);
+      return { error: "another service already has this name" };
+    }
     reply.code(201);
     return createService(db, input);
   });
@@ -60,6 +71,10 @@ export function registerFleetRoutes(app: FastifyInstance, db: Database.Database)
     if ("error" in input) {
       reply.code(400);
       return input;
+    }
+    if (slugTaken(db, input.name, current.id)) {
+      reply.code(409);
+      return { error: "another service already has this name" };
     }
     return updateService(db, current.id, input);
   });

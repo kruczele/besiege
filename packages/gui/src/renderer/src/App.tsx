@@ -1358,6 +1358,7 @@ function FleetHostCard({
             </div>
             <div className="fleet-row-sub">
               {svc.enabled ? "to" : "off · was to"} {svc.exposeOn === null ? "every other machine" : svc.exposeOn.join(", ")}
+              {" · "}/s/{svc.slug}/
             </div>
             <div className="fleet-row-actions">
               <button onClick={() => run(() => window.api.setFleetServiceEnabled(svc.id, !svc.enabled))}>
@@ -1431,7 +1432,7 @@ function FleetHostCard({
                   <code>localhost:{x.localPort}</code>
                 </div>
                 <div className="fleet-row-sub">
-                  from {x.sourceHost} ·{" "}
+                  from {x.sourceHost} · /s/{x.slug}/ ·{" "}
                   <span className={x.state === "listening" ? "status-up" : x.state === "error" ? "status-down" : ""}>
                     {x.state}
                   </span>

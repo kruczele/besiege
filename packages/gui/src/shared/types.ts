@@ -253,6 +253,8 @@ export interface FleetAgent {
 export interface FleetService {
   id: number;
   name: string;
+  // Its path on the web port: /s/<slug>/.
+  slug: string;
   port: number;
   enabled: boolean;
   // null: every other machine.
@@ -263,6 +265,7 @@ export interface FleetService {
 export interface FleetExposure {
   serviceId: number;
   name: string;
+  slug: string;
   sourceHost: string;
   localPort: number;
   state: "pending" | "listening" | "error" | "offline";

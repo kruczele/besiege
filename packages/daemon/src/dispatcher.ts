@@ -58,8 +58,9 @@ export function startDispatcher(opts: DispatcherOptions): { close(): void } {
 
   // /exec/* is always about this machine's own PTYs (it's what a primary
   // calls, and what localExecFor below attaches to), never the primary's.
-  // /tunnel/* likewise dials this machine's own loopback.
-  const isLocalOnly = (path: string) => path.startsWith("/exec/") || path.startsWith("/tunnel/");
+  // /tunnel/* and /local/* likewise are about this machine's own loopback.
+  const isLocalOnly = (path: string) =>
+    path.startsWith("/exec/") || path.startsWith("/tunnel/") || path.startsWith("/local/");
 
   function httpTarget(path: string, method: string | undefined, headers: IncomingMessage["headers"]) {
     if (primary && reachable && !isLocalOnly(path)) {
