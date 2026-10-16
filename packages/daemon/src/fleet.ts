@@ -16,7 +16,7 @@ import { buildHeartbeat, type Heartbeat } from "./heartbeat.js";
 import { hostId as selfId } from "./host.js";
 import type { HostStats } from "./host-stats.js";
 import { wakeRemote } from "./remote-exec.js";
-import { exposedLocalPort, exposesOn, listServices, relayStatusesFor, type RelayState } from "./services.js";
+import { exposedLocalPort, exposesOn, listServices, relayStatusesFor, slugOf, type RelayState } from "./services.js";
 import { readOrCreateTcpToken } from "./tcp-token.js";
 import { performWake } from "./wake.js";
 
@@ -372,6 +372,8 @@ export interface HostAgent {
 export interface HostService {
   id: number;
   name: string;
+  // Its path on the web port: /s/<slug>/.
+  slug: string;
   port: number;
   enabled: boolean;
   // null: every other host.
@@ -382,6 +384,7 @@ export interface HostService {
 export interface HostExposure {
   serviceId: number;
   name: string;
+  slug: string;
   sourceHost: string;
   localPort: number;
   // "offline" when this machine isn't heartbeating, so it can't be asked.
@@ -440,7 +443,7 @@ export function listHosts(db: Database.Database): HostView[] {
       agents: agentsOn(db, id),
       services: services
         .filter((s) => s.hostId === id)
-        .map((s) => ({ id: s.id, name: s.name, port: s.port, enabled: s.enabled, exposeOn: s.exposeOn, localPort: s.localPort })),
+        .map((s) => ({ id: s.id, name: s.name, slug: slugOf(s.name), port: s.port, enabled: s.enabled, exposeOn: s.exposeOn, localPort: s.localPort })),
       exposed: services
         .filter((s) => exposesOn(s, id))
         .map((s) => {
@@ -449,6 +452,7 @@ export function listHosts(db: Database.Database): HostView[] {
           return {
             serviceId: s.id,
             name: s.name,
+            slug: slugOf(s.name),
             sourceHost: s.hostId,
             localPort: exposedLocalPort(s),
             state: !online ? "offline" : (reported?.state ?? "pending"),

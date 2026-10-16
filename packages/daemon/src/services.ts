@@ -60,6 +60,14 @@ export function getService(db: Database.Database, id: number): ServiceDef | null
   return row ? toDef(row) : null;
 }
 
+// How a service is addressed on the web port: /s/<slug>/. Derived from the
+// name rather than asked for, and unique across services (see fleet routes).
+export const slugOf = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
 export interface ServiceInput {
   name: string;
   hostId: string;
@@ -79,6 +87,7 @@ export function parseServiceInput(body: unknown, current?: ServiceDef): ServiceI
   const host = raw.host_id === undefined ? current?.hostId : typeof raw.host_id === "string" ? raw.host_id.trim().toLowerCase() : "";
   const port = raw.port === undefined ? current?.port : raw.port;
   if (!name) return { error: "name is required" };
+  if (!slugOf(name)) return { error: "name needs at least one letter or digit" };
   if (!host) return { error: "host_id is required" };
   if (!isPort(port)) return { error: "port must be an integer between 1 and 65535" };
 
@@ -151,6 +160,9 @@ export interface Assignments {
   serves: number[];
   // Loopback ports this host should listen on, and where each leads.
   expose: ExposeSpec[];
+  // The same services as `serves`, by name, for /s/<slug>/ on this host.
+  // Absent from an older control plane.
+  named?: { name: string; port: number }[];
 }
 
 export const exposedLocalPort = (s: ServiceDef) => s.localPort ?? s.port;
@@ -167,6 +179,7 @@ export function assignmentsFor(
   const services = listServices(db).filter((s) => s.enabled);
   return {
     serves: services.filter((s) => s.hostId === host).map((s) => s.port),
+    named: services.filter((s) => s.hostId === host).map((s) => ({ name: s.name, port: s.port })),
     expose: services
       .filter((s) => exposesOn(s, host))
       .map((s) => ({
@@ -208,6 +221,7 @@ const relays = new Map<number, Relay>();
 // Specs that lost their port to an earlier service in the same assignment.
 const conflicts = new Map<number, RelayStatus>();
 let served = new Set<number>();
+let servedNamed: { name: string; port: number }[] = [];
 
 // The same token every follower already holds for the control plane, which
 // every daemon accepts on its TCP listener — the primary's own, or the one
@@ -282,6 +296,7 @@ function closeRelay(relay: Relay): void {
 // listener that failed to bind is retried on the next one.
 export function applyAssignments(next: Assignments): void {
   served = new Set(next.serves);
+  servedNamed = next.named ?? [];
 
   const wanted = new Map<number, ExposeSpec>();
   conflicts.clear();
@@ -338,6 +353,26 @@ export function closeRelays(): void {
   relays.clear();
   conflicts.clear();
   served = new Set();
+  servedNamed = [];
+}
+
+export interface LocalService {
+  slug: string;
+  name: string;
+  // Loopback port on this machine that reaches it: the real service where
+  // it runs, the relay's listener everywhere else.
+  port: number;
+  state: RelayState | "local";
+}
+
+// Every shared service this machine can reach on its own loopback, for the
+// web server's /s/<slug>/ proxy. Own services win a name clash.
+export function localServices(): LocalService[] {
+  const own = servedNamed.map((s) => ({ slug: slugOf(s.name), name: s.name, port: s.port, state: "local" as const }));
+  const relayed = [...relays.values()]
+    .filter((r) => r.state !== "error")
+    .map((r) => ({ slug: slugOf(r.spec.name), name: r.spec.name, port: r.spec.localPort, state: r.state }));
+  return [...own, ...relayed];
 }
 
 export function isServed(port: number): boolean {

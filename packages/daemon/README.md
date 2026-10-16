@@ -171,6 +171,17 @@ enabled for it. The tunnel uses the same token as everything else between
 daemons. Traffic is TCP, so anything that speaks TCP works, but it is not
 encrypted beyond what the tailnet already does.
 
+Where the web UI runs, every service is also served at
+`http://localhost:4571/s/<slug>/...` (the slug is the name lowercased, with
+runs of other characters turned into `-`; names must be unique by slug).
+The web server asks its own daemon (`GET /local/services`, always answered
+locally) which loopback port leads to each service, strips the prefix and
+forwards, including websockets, with `Host` set to the service's own
+address, an `X-Forwarded-Prefix` header, and root-relative `Location`
+redirects rewritten under the prefix. Pages that link to absolute paths
+(`/assets/app.js`) won't resolve under a prefix, so use the port form for
+those.
+
 A host whose daemon is restarted, or loses the control plane, keeps the
 listeners it last had; they are re-synced on the next heartbeat.
 
