@@ -1064,6 +1064,79 @@ body {
   border-color: var(--accent);
 }
 
+.layout-tab-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.layout-tab-edit:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.layout-tab-edit.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.layout-tab.drop-target {
+  outline: 2px solid var(--accent);
+}
+
+.terminal-grid-pane-header.draggable {
+  cursor: grab;
+}
+
+.terminal-grid-pane-grip {
+  flex-shrink: 0;
+  margin-right: -0.25rem;
+  opacity: 0.6;
+}
+
+.terminal-grid-pane-header.draggable .terminal-grid-pane-title {
+  flex: 1;
+}
+
+.pane-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.pane-drop-zone {
+  position: absolute;
+  background: var(--accent-soft);
+  border: 2px solid var(--accent);
+  pointer-events: none;
+}
+
+.pane-drop-zone-left {
+  inset: 0 50% 0 0;
+}
+
+.pane-drop-zone-right {
+  inset: 0 0 0 50%;
+}
+
+.pane-drop-zone-top {
+  inset: 0 0 50% 0;
+}
+
+.pane-drop-zone-bottom {
+  inset: 50% 0 0 0;
+}
+
 .layout-tab-rename {
   background: var(--bg);
   border: 1px solid var(--accent);
@@ -1159,6 +1232,7 @@ body {
 }
 
 .terminal-grid-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;

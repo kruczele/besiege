@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { Copy, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
+import { Copy, GripVertical, LayoutGrid, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
 import type {
   ActiveClaim,
   AgentAdapter,
@@ -13,7 +13,18 @@ import type {
   TerminalLayout,
   TerminalSession,
 } from "../../shared/types.js";
-import { closePane, emptyTree, leavesInOrder, setPaneSession, setSizes, splitPane } from "./pane-tree.js";
+import {
+  appendLeaf,
+  closePane,
+  emptyTree,
+  findLeaf,
+  insertBeside,
+  leavesInOrder,
+  setPaneSession,
+  setSizes,
+  splitPane,
+  type DropEdge,
+} from "./pane-tree.js";
 
 const POLL_SESSIONS = 3000;
 
@@ -240,6 +251,51 @@ function NotePane({ note }: { note: PaneNote }) {
   );
 }
 
+// Present only while layout editing is on; `dragPaneId` is null until a pane
+// header is actually picked up.
+interface PaneDnd {
+  dragPaneId: string | null;
+  onDragStart: (paneId: string) => void;
+  onDragEnd: () => void;
+  onDrop: (targetPaneId: string, edge: DropEdge) => void;
+}
+
+function edgeAt(e: React.DragEvent<HTMLElement>): DropEdge {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  const distances: [DropEdge, number][] = [
+    ["left", x],
+    ["right", 1 - x],
+    ["top", y],
+    ["bottom", 1 - y],
+  ];
+  return distances.reduce((best, d) => (d[1] < best[1] ? d : best))[0];
+}
+
+// Covers a pane while another pane is being dragged, so the terminal under it
+// can't swallow the drop; the nearest edge to the cursor picks where it lands.
+function PaneDropOverlay({ onDrop }: { onDrop: (edge: DropEdge) => void }) {
+  const [edge, setEdge] = useState<DropEdge | null>(null);
+  return (
+    <div
+      className="pane-drop-overlay"
+      onDragOver={(e) => {
+        e.preventDefault();
+        setEdge(edgeAt(e));
+      }}
+      onDragLeave={() => setEdge(null)}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop(edgeAt(e));
+        setEdge(null);
+      }}
+    >
+      {edge && <div className={`pane-drop-zone pane-drop-zone-${edge}`} />}
+    </div>
+  );
+}
+
 // Recursively renders a PaneNode: a split becomes two flex children plus a
 // draggable divider, a leaf becomes a live terminal pane, a pinned note
 // panel, or (session null, note null) the launcher above.
@@ -250,6 +306,7 @@ function PaneView({
   adapters,
   claimsBySessionId,
   activePaneId,
+  dnd,
   onTitle,
   onActivate,
   onSplit,
@@ -269,6 +326,7 @@ function PaneView({
   // currently backs it (e.g. after a resume).
   claimsBySessionId: Record<string, ActiveClaim[]>;
   activePaneId: string | null;
+  dnd: PaneDnd | null;
   onTitle: (id: number, title: string) => void;
   onActivate: (paneId: string) => void;
   onSplit: (paneId: string, dir: "row" | "col") => void;
@@ -287,6 +345,7 @@ function PaneView({
         adapters={adapters}
         claimsBySessionId={claimsBySessionId}
         activePaneId={activePaneId}
+        dnd={dnd}
         onTitle={onTitle}
         onActivate={onActivate}
         onSplit={onSplit}
@@ -308,7 +367,17 @@ function PaneView({
 
   return (
     <div className={`terminal-grid-pane ${isActive ? "active" : ""}`} onMouseDownCapture={() => onActivate(node.id)}>
-      <div className="terminal-grid-pane-header">
+      <div
+        className={`terminal-grid-pane-header ${dnd ? "draggable" : ""}`}
+        draggable={dnd !== null}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", node.id);
+          dnd?.onDragStart(node.id);
+        }}
+        onDragEnd={() => dnd?.onDragEnd()}
+      >
+        {dnd && <GripVertical size={13} className="terminal-grid-pane-grip" />}
         <span className={`terminal-grid-pane-title ${isExited ? "exited" : ""}`}>
           {node.note ? node.note.title : session ? titles[session.id] ?? session.label ?? `Terminal #${session.id}` : "Empty"}
         </span>
@@ -337,6 +406,9 @@ function PaneView({
           </button>
         </div>
       </div>
+      {dnd && dnd.dragPaneId !== null && dnd.dragPaneId !== node.id && (
+        <PaneDropOverlay onDrop={(edge) => dnd.onDrop(node.id, edge)} />
+      )}
       {node.note ? (
         <NotePane note={node.note} />
       ) : node.sessionId === null ? (
@@ -456,6 +528,10 @@ export function TerminalsMain({
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [renamingLayoutId, setRenamingLayoutId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  const [editingLayout, setEditingLayout] = useState(false);
+  const [dragPaneId, setDragPaneId] = useState<string | null>(null);
+  const [dropTabId, setDropTabId] = useState<number | null>(null);
 
   const layoutsRef = useRef(layouts);
   useEffect(() => {
@@ -651,6 +727,41 @@ export function TerminalsMain({
     persistTree(layout.id, setSizes(layout.tree, splitId, sizes));
   };
 
+  const endDrag = () => {
+    draggingRef.current = false;
+    setDragPaneId(null);
+    setDropTabId(null);
+  };
+
+  // The dragged pane's drop handlers run after it may already have been
+  // re-parented (and its header unmounted), so dragend can't be relied on to
+  // reset — every drop path calls endDrag itself.
+  const handleDropPane = (targetPaneId: string, edge: DropEdge) => {
+    const paneId = dragPaneId;
+    endDrag();
+    if (!activeLayout || paneId === null || paneId === targetPaneId) return;
+    const leaf = findLeaf(activeLayout.tree, paneId);
+    const rest = closePane(activeLayout.tree, paneId);
+    if (!leaf || !rest) return;
+    const tree = insertBeside(rest, targetPaneId, leaf, edge);
+    if (!tree) return;
+    persistTree(activeLayout.id, tree);
+    setActivePaneId(paneId);
+  };
+
+  const handleDropOnTab = (layoutId: number) => {
+    const paneId = dragPaneId;
+    endDrag();
+    const target = layouts.find((l) => l.id === layoutId);
+    if (!activeLayout || paneId === null || !target || target.id === activeLayout.id) return;
+    const leaf = findLeaf(activeLayout.tree, paneId);
+    if (!leaf) return;
+    // Target first: if the second write fails the pane is duplicated, not lost.
+    persistTree(target.id, appendLeaf(target.tree, leaf));
+    persistTree(activeLayout.id, closePane(activeLayout.tree, paneId) ?? emptyTree());
+    if (activePaneId === paneId) setActivePaneId(null);
+  };
+
   const handleNewTab = async () => {
     if (campaignId === null) return;
     const res = await window.api.createLayout(campaignId, `Tab ${layouts.length + 1}`, emptyTree());
@@ -739,7 +850,20 @@ export function TerminalsMain({
     <div className="terminal-area">
       <div className="layout-tabs">
         {layouts.map((l) => (
-          <div key={l.id} className={`layout-tab ${activeLayoutId === l.id ? "selected" : ""}`}>
+          <div
+            key={l.id}
+            className={`layout-tab ${activeLayoutId === l.id ? "selected" : ""} ${dropTabId === l.id ? "drop-target" : ""}`}
+            onDragOver={(e) => {
+              if (dragPaneId === null || l.id === activeLayoutId) return;
+              e.preventDefault();
+              setDropTabId(l.id);
+            }}
+            onDragLeave={() => setDropTabId((cur) => (cur === l.id ? null : cur))}
+            onDrop={(e) => {
+              e.preventDefault();
+              handleDropOnTab(l.id);
+            }}
+          >
             {renamingLayoutId === l.id ? (
               <input
                 className="layout-tab-rename"
@@ -772,6 +896,16 @@ export function TerminalsMain({
         <button className="layout-tab-new" title="New tab (split it with Ctrl+Shift+→/↓)" onClick={handleNewTab}>
           <Plus size={13} /> tab
         </button>
+        <button
+          className={`layout-tab-edit ${editingLayout ? "active" : ""}`}
+          title="Drag panes by their header to rearrange them, or onto another tab"
+          onClick={() => {
+            setEditingLayout((v) => !v);
+            endDrag();
+          }}
+        >
+          <LayoutGrid size={13} /> {editingLayout ? "Done" : "Edit layout"}
+        </button>
       </div>
 
       {error && <p className="status status-down">{error}</p>}
@@ -785,6 +919,19 @@ export function TerminalsMain({
             adapters={adapters}
             claimsBySessionId={claimsBySessionId}
             activePaneId={activePaneId}
+            dnd={
+              editingLayout
+                ? {
+                    dragPaneId,
+                    onDragStart: (paneId) => {
+                      draggingRef.current = true;
+                      setDragPaneId(paneId);
+                    },
+                    onDragEnd: endDrag,
+                    onDrop: handleDropPane,
+                  }
+                : null
+            }
             onTitle={onTitleChange}
             onActivate={setActivePaneId}
             onSplit={handleSplit}
