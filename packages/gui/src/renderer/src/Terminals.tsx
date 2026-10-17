@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { Copy, GripVertical, LayoutGrid, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
 import type {
@@ -56,6 +57,9 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
     const term = new Terminal({
       convertEol: true,
       fontSize: 13,
+      // The default (courier) lacks block-element glyphs like ▀ ▄ (agy's logo),
+      // so they fall back to a font with a different advance and misalign.
+      fontFamily: 'Menlo, "SF Mono", Monaco, Consolas, "DejaVu Sans Mono", monospace',
       theme: { background: "#1b1e27", foreground: "#e7e8ed" },
     });
     const fit = new FitAddon();
@@ -64,6 +68,14 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
     // setWindowOpenHandler (main/index.ts) already routes to shell.openExternal.
     term.loadAddon(new WebLinksAddon());
     term.open(container);
+    // The WebGL renderer draws block/box characters itself instead of via
+    // font glyphs. Optional: on failure or GPU context loss xterm falls back
+    // to its DOM renderer.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch {}
     fit.fit();
 
     // Reserved pane-split/navigation combos must never reach the shell —
