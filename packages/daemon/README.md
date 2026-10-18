@@ -267,6 +267,11 @@ separately — see `agents.default.yaml`'s `mcpRegisterCommand` (a one-time
 id, so Besiege discovers it after launch from agy's own
 `~/.gemini/antigravity-cli/cache/last_conversations.json`).
 
+Codex follows the same pattern: `codex mcp add` for the MCP server, and
+`sessionIdFromRolloutDir` to learn the conversation id from the
+`session_meta` line of the new `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`.
+Resume is `codex resume <id>` (a subcommand, hence `resumeFlag: "resume {sessionId}"`).
+
 ## API
 
 | Route | What |

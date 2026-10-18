@@ -7,7 +7,7 @@ import type { IPty } from "@lydell/node-pty";
 import type { WebSocket } from "ws";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,6 +155,48 @@ function readWorkspaceCacheEntry(path: string, cwd: string): string | undefined 
   return undefined;
 }
 
+// Best-effort scan of a codex-style rollout directory for the conversation
+// a just-launched session in `cwd` created: a rollout-*.jsonl whose
+// session_meta first line names this cwd and that was written after
+// `since`. Only today's date shards (local and UTC, since the shard date
+// isn't documented) are walked, so the scan stays cheap.
+function findRolloutSessionId(rootDir: string, cwd: string, since: number): string | undefined {
+  const root = expandHome(rootDir);
+  const shards = new Set<string>();
+  for (const d of [new Date(since), new Date()]) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    shards.add(join(String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate())));
+    shards.add(join(String(d.getUTCFullYear()), pad(d.getUTCMonth() + 1), pad(d.getUTCDate())));
+  }
+  let newest: { id: string; mtime: number } | undefined;
+  for (const shard of shards) {
+    let names: string[];
+    try {
+      names = readdirSync(join(root, shard));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.startsWith("rollout-") || !name.endsWith(".jsonl")) continue;
+      const file = join(root, shard, name);
+      try {
+        const mtime = statSync(file).mtimeMs;
+        if (mtime < since || (newest && mtime <= newest.mtime)) continue;
+        const fd = openSync(file, "r");
+        const buf = Buffer.alloc(8192);
+        const n = readSync(fd, buf, 0, buf.length, 0);
+        closeSync(fd);
+        const meta: unknown = JSON.parse(buf.toString("utf8", 0, n).split("\n")[0]);
+        const payload = (meta as { payload?: { id?: unknown; cwd?: unknown } }).payload;
+        if (payload?.cwd === cwd && typeof payload.id === "string") newest = { id: payload.id, mtime };
+      } catch {
+        // partially written first line, unreadable file — try again next poll.
+      }
+    }
+  }
+  return newest?.id;
+}
+
 // For adapters with sessionIdFromWorkspaceCache set (agy): the CLI mints
 // its own conversation id and only surfaces it, undocumented, via a
 // workspace-path-keyed cache file it writes shortly after an interactive
@@ -164,17 +206,16 @@ function readWorkspaceCacheEntry(path: string, cwd: string): string | undefined 
 // report it once found. Give up silently after a timeout, and bail early if
 // the session has already exited — this is strictly best-effort, resume just
 // isn't offered if it never lands.
-function discoverWorkspaceCacheSessionId(
+function discoverSessionId(
   execId: string,
-  cachePath: string,
-  cwd: string,
+  read: () => string | undefined,
   previousValue: string | undefined,
 ): void {
   const deadline = Date.now() + 20_000;
   const poll = () => {
     const session = live.get(execId);
     if (!session) return; // session already exited
-    const current = readWorkspaceCacheEntry(cachePath, cwd);
+    const current = read();
     if (current && current !== previousValue) {
       session.record.resumeSessionId = current;
       emit({ type: "resume-id", execId, resumeSessionId: current });
@@ -210,7 +251,7 @@ export function expandHome(cwd: string): string {
 
 // Which conversation id to feed the adapter's resumeFlag / to gate resume
 // availability on. Adapters that mint their own id and only surface it
-// post-launch (sessionIdFromWorkspaceCache set — agy) must use
+// post-launch (sessionIdFromWorkspaceCache / sessionIdFromRolloutDir set — agy, codex) must use
 // resumeSessionId specifically: sessionId there is Besiege's own
 // correlation id (BESIEGE_SESSION_ID), not a real conversation id, and
 // passing it to e.g. `--conversation` would resume nothing that exists.
@@ -220,7 +261,7 @@ export function resolveResumeConversationId(
   sessionId: string | null,
   resumeSessionId: string | null | undefined,
 ): string | null {
-  if (adapter?.sessionIdFromWorkspaceCache) return resumeSessionId ?? null;
+  if (adapter?.sessionIdFromWorkspaceCache || adapter?.sessionIdFromRolloutDir) return resumeSessionId ?? null;
   return resumeSessionId ?? sessionId;
 }
 
@@ -283,10 +324,19 @@ export function launch(spec: LaunchSpec): ExecRecord {
     ? splitArgs(adapter.mcpConfigFlag).map((token) => token.replace("{path}", ensureMcpConfig()))
     : [];
 
+  const extraTokens = spec.extraArgs ? splitArgs(spec.extraArgs) : [];
+
+  // A resume the user typed into extra args (--resume <id>, `resume <id>`)
+  // already picks the conversation; also passing the pre-assigned
+  // sessionIdFlag makes claude refuse to boot ("--session-id" needs
+  // --fork-session alongside --resume), so it takes the place of ours.
+  const resumeToken = adapter?.resumeFlag ? splitArgs(adapter.resumeFlag)[0] : undefined;
+  const userResumes = resumeToken !== undefined && extraTokens.includes(resumeToken);
+
   const sessionArgs =
     resumeConversationId && adapter?.resumeFlag
       ? splitArgs(adapter.resumeFlag).map((token) => token.replace("{sessionId}", resumeConversationId))
-      : adapter?.sessionIdFlag
+      : adapter?.sessionIdFlag && !userResumes
         ? splitArgs(adapter.sessionIdFlag).map((token) => token.replace("{sessionId}", spec.sessionId))
         : [];
 
@@ -295,7 +345,7 @@ export function launch(spec: LaunchSpec): ExecRecord {
         ...mcpArgs,
         ...sessionArgs,
         ...(spec.yolo && adapter.yoloFlag ? [adapter.yoloFlag] : []),
-        ...(spec.extraArgs ? splitArgs(spec.extraArgs) : []),
+        ...extraTokens,
       ]
     : [];
 
@@ -332,7 +382,12 @@ export function launch(spec: LaunchSpec): ExecRecord {
   live.set(record.execId, session);
 
   if (!spec.resume && adapter?.sessionIdFromWorkspaceCache) {
-    discoverWorkspaceCacheSessionId(record.execId, adapter.sessionIdFromWorkspaceCache, cwd, workspaceCacheEntryBefore);
+    const cachePath = adapter.sessionIdFromWorkspaceCache;
+    discoverSessionId(record.execId, () => readWorkspaceCacheEntry(cachePath, cwd), workspaceCacheEntryBefore);
+  } else if (!spec.resume && adapter?.sessionIdFromRolloutDir) {
+    const rolloutDir = adapter.sessionIdFromRolloutDir;
+    const launchedAt = record.startedAt - 1000;
+    discoverSessionId(record.execId, () => findRolloutSessionId(rolloutDir, cwd, launchedAt), undefined);
   }
 
   proc.onData((chunk) => {
