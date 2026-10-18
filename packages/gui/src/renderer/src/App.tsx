@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
   Copy,
   ExternalLink,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   PinOff,
   Plus,
@@ -120,14 +122,36 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
     return () => window.removeEventListener("keydown", handler);
   }, [chrome]);
 
+  const sidebar = useSidebarLayout();
+
   return (
     <div className="app-frame">
       {chrome && <TitleBar />}
-      <div className="shell">
-        <aside className="sidebar">
+      <div className={`shell${sidebar.dragging ? " resizing" : ""}`}>
+        {sidebar.collapsed && (
+          <div className="sidebar-rail">
+            <button
+              className="sidebar-toggle"
+              aria-label="Expand sidebar"
+              title="Expand sidebar (Ctrl/Cmd+B)"
+              onClick={sidebar.toggle}
+            >
+              <PanelLeftOpen size={16} />
+            </button>
+          </div>
+        )}
+        <aside className="sidebar" hidden={sidebar.collapsed} style={{ flexBasis: sidebar.width }}>
           <div className="sidebar-header">
             <img src={favicon} className="brand-icon" alt="Besiege" />
             <p className="tab-helptext">{TAB_HELPTEXT[tab]}</p>
+            <button
+              className="sidebar-toggle"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar (Ctrl/Cmd+B)"
+              onClick={sidebar.toggle}
+            >
+              <PanelLeftClose size={16} />
+            </button>
           </div>
           <nav className="tabs">
             {(["campaigns", "live", "rules"] as Tab[]).map((t) => (
@@ -163,6 +187,21 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
             <StatusPanel />
           </div>
         </aside>
+        {!sidebar.collapsed && (
+          <div
+            className="sidebar-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemax={SIDEBAR_MAX_WIDTH}
+            aria-valuenow={sidebar.width}
+            tabIndex={0}
+            onPointerDown={sidebar.onResizePointerDown}
+            onKeyDown={sidebar.onResizeKeyDown}
+            onDoubleClick={sidebar.resetWidth}
+          />
+        )}
         <main className="main">
           <TerminalsMain
             campaignId={activeCampaignId}
@@ -176,6 +215,93 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
       </div>
     </div>
   );
+}
+
+const SIDEBAR_WIDTH_KEY = "besiege.sidebar.width";
+const SIDEBAR_COLLAPSED_KEY = "besiege.sidebar.collapsed";
+const SIDEBAR_DEFAULT_WIDTH = 352;
+const SIDEBAR_MIN_WIDTH = 240;
+const SIDEBAR_MAX_WIDTH = 720;
+const SIDEBAR_KEY_STEP = 16;
+
+const clampSidebarWidth = (w: number) =>
+  Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(w)));
+
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Persistence is a convenience; a blocked store must not break the layout.
+  }
+}
+
+function useSidebarLayout() {
+  const [width, setWidth] = useState(() => {
+    const stored = Number(readStored(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? clampSidebarWidth(stored) : SIDEBAR_DEFAULT_WIDTH;
+  });
+  const [collapsed, setCollapsed] = useState(() => readStored(SIDEBAR_COLLAPSED_KEY) === "1");
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => writeStored(SIDEBAR_WIDTH_KEY, String(width)), [width]);
+  useEffect(() => writeStored(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0"), [collapsed]);
+
+  const toggle = useCallback(() => setCollapsed((c) => !c), []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        toggle();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [toggle]);
+
+  const onResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startWidth = width;
+    setDragging(true);
+    const onMove = (ev: PointerEvent) => setWidth(clampSidebarWidth(startWidth + ev.clientX - startX));
+    const onEnd = () => {
+      setDragging(false);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onEnd);
+      handle.removeEventListener("pointercancel", onEnd);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onEnd);
+    handle.addEventListener("pointercancel", onEnd);
+  };
+
+  const onResizeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "ArrowLeft") setWidth((w) => clampSidebarWidth(w - SIDEBAR_KEY_STEP));
+    else if (e.key === "ArrowRight") setWidth((w) => clampSidebarWidth(w + SIDEBAR_KEY_STEP));
+    else return;
+    e.preventDefault();
+  };
+
+  return {
+    width,
+    collapsed,
+    dragging,
+    toggle,
+    resetWidth: () => setWidth(SIDEBAR_DEFAULT_WIDTH),
+    onResizePointerDown,
+    onResizeKeyDown,
+  };
 }
 
 // ── Title bar ─────────────────────────────────────────────────────────────────
