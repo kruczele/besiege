@@ -8,7 +8,7 @@
   <img alt="Status: actively evolving" src="https://img.shields.io/badge/status-actively%20evolving-f5b544?style=flat-square">
 </p>
 
-Besiege is a command center for coding agents — terminals, agent sessions, notes, repos, and pull requests, all grouped around the work you're actually doing, with one place to see what needs your attention instead of hunting across terminals and GitHub. It runs across all your machines, so a session started on your laptop can be watched from your desktop, and a box that's asleep gets woken when there's work for it.
+Besiege is a command center for coding agents — terminals, agent sessions, notes, repos, and pull requests, all grouped around the work you're actually doing, with one place to see what needs your attention instead of hunting across terminals and GitHub. It treats every machine you own as one pool of compute: sessions land where there's room, you can attach to any of them from any box, and a machine that's asleep gets woken when there's work for it.
 
 It works with **Claude Code**, **Codex**, **OpenCode** and **Antigravity (`agy`)**, and is built to run on a **[Tailscale](https://tailscale.com) tailnet** — see [Built for Tailscale](#built-for-tailscale).
 
@@ -67,7 +67,7 @@ Running many agents at once, across many repos, breaks down in a few specific wa
 - **Work has no home.** A terminal tab is not a unit of work — it dies with the window and tells you nothing about what it was for.
 - **Context doesn't survive.** Config and preferences live in ad-hoc CLAUDE.md edits; nothing carries forward what a prior session already learned about a recurring failure.
 - **Attention is unscoped.** Knowing which of N terminals just asked a question means tab-hopping; knowing which of your PRs need you means opening GitHub over and over.
-- **One machine isn't enough.** Agents are memory-hungry. Real work ends up spread over a laptop, a desktop and a server, with no single view of what's running where.
+- **One machine isn't enough.** Agents are memory-hungry, and a few parallel sessions will get the OOM killer to take out the lot. Besiege was built by someone spreading agents across six physical computers to use every one of them: without a single view, you're left remembering which agent is on which box, which box is nearly out of memory, and which one is asleep.
 
 ### The scale case
 
@@ -78,6 +78,8 @@ This started from an org-wide rollout across ~300 repos producing ~1,200 PRs. Gi
 <p align="center">
   <img src="docs/assets/fleet.svg" alt="Besiege fleet topology: clients, a control plane and hosts inside a tailnet; GitHub outside" width="100%">
 </p>
+
+Besiege treats every machine you can reach as one pool of compute. Start work anywhere, see every agent on every box in one place, and keep going on whichever machine you're sitting at, without caring which one is actually running it. It exists because six physical computers all had spare capacity, and OOM kills kept wasting it.
 
 One always-on daemon is the **control plane**. It holds the registry of every session, the inbox and the scheduler. Every other machine runs its own daemon as a **host**, owning its PTYs and heartbeating load, memory and per-process RSS/CPU to the control plane every 5 seconds.
 
