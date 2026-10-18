@@ -138,6 +138,81 @@ body {
   overflow: hidden;
 }
 
+.sidebar[hidden] {
+  display: none;
+}
+
+.sidebar-resizer {
+  position: relative;
+  flex: 0 0 0;
+  width: 0;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+/* Wider invisible hit area straddling the sidebar's border. */
+.sidebar-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+}
+
+.sidebar-resizer:hover::before,
+.sidebar-resizer:focus-visible::before,
+.shell.resizing .sidebar-resizer::before {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.sidebar-resizer:focus-visible {
+  outline: none;
+}
+
+/* Terminals swallow pointer events mid-drag otherwise, dropping the resize. */
+.shell.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.shell.resizing .main {
+  pointer-events: none;
+}
+
+.sidebar-rail {
+  flex: 0 0 2.5rem;
+  display: flex;
+  justify-content: center;
+  padding-top: 1.25rem;
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  background: var(--surface-active);
+  color: var(--text);
+}
+
+.sidebar-header .sidebar-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .sidebar-content {
   flex: 1;
   min-height: 0;
