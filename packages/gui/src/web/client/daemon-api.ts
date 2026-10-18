@@ -12,6 +12,7 @@ import type {
   FleetOverview,
   FleetServiceInput,
   Notification,
+  StatusUpdate,
   PaneNode,
   PrGridRow,
   TaskDefinition,
@@ -52,6 +53,9 @@ export const fetchNotifications = (unacknowledgedOnly: boolean) =>
   callDaemon<Notification[]>("GET", `/notifications${unacknowledgedOnly ? "?unacknowledged=true" : ""}`);
 export const acknowledgeNotification = (id: number) =>
   callDaemon<Notification>("POST", `/notifications/${id}/ack`);
+
+export const fetchStatusUpdates = (limit?: number) =>
+  callDaemon<StatusUpdate[]>("GET", `/status-updates${limit ? `?limit=${limit}` : ""}`);
 
 export const fetchCampaigns = (includeArchived?: boolean) =>
   callDaemon<Campaign[]>("GET", `/campaigns${includeArchived ? "?includeArchived=1" : ""}`);

@@ -735,7 +735,40 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    name: "0040_status_updates",
+    sql: `
+      -- One row per report_status call: a one-two sentence "where things
+      -- stand" an agent leaves each time it finishes something. The GUI's
+      -- bottom bar shows the newest; older rows are history.
+      CREATE TABLE status_updates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        cwd TEXT,
+        repo TEXT,
+        pr_number INTEGER,
+        summary TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_status_updates_created ON status_updates (id DESC);
+    `,
+  },
+  {
+    name: "0041_status_report_rule",
+    sql: "-- seed-only migration, see STATUS_REPORT_RULE below (inserted via `after`)",
+    after: (db) => {
+      db.prepare(
+        "INSERT INTO config_rules (pattern, context, besiege_only, created_at) VALUES ('*', ?, 1, ?)",
+      ).run(STATUS_REPORT_RULE, new Date().toISOString());
+    },
+  },
 ];
+
+// Seeded as a besiege_only '*' rule, like the orientation rule below — plain
+// data in the Edicts tab, editable or deletable by the user.
+const STATUS_REPORT_RULE = `Each time you finish a piece of work (or stop to wait on a human), call the besiege MCP tool report_status with a one-to-two sentence summary of where things stand — what you were working on and its current state, e.g. "Added retry to the webhook sender; CI is green and it's waiting on review." Pass repo (org/name) and prNumber whenever the work is tied to a pull request, so the GUI can link straight to it. Keep it short and concrete; this is what the operator reads at a glance in the bar at the bottom of the Besiege window, so write it for someone who hasn't been following your session.
+
+This rule was seeded by Besiege and applies in every Besiege session. Edit or delete it from the Edicts tab if it stops being accurate.`;
 
 // Pre-0031, a split was a binary { dir, ratio, a, b } node (nesting two
 // children at a time), so repeated same-direction splits produced a

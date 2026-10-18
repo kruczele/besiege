@@ -13,6 +13,7 @@ import type {
   FleetService,
   FleetServiceInput,
   Notification,
+  StatusUpdate,
   PaneNode,
   Pr,
   PrClaim,
@@ -109,6 +110,9 @@ export const fetchNotifications = (unacknowledgedOnly: boolean) =>
 
 export const acknowledgeNotification = (id: number) =>
   callDaemon<Notification>("POST", `/notifications/${id}/ack`);
+
+export const fetchStatusUpdates = (limit?: number) =>
+  callDaemon<StatusUpdate[]>("GET", `/status-updates${limit ? `?limit=${limit}` : ""}`);
 
 // Campaigns
 export const fetchCampaigns = (includeArchived?: boolean) =>

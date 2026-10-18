@@ -35,6 +35,17 @@ export interface Notification {
   supersededAt: string | null;
 }
 
+export interface StatusUpdate {
+  id: number;
+  sessionId: string;
+  cwd: string | null;
+  repo: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
+  summary: string;
+  createdAt: string;
+}
+
 export type DaemonResult<T> = { ok: true; result: T } | { ok: false; error: string };
 
 export interface Campaign {
