@@ -110,9 +110,9 @@ export const webApi: Api = {
   releaseClaim: (prId) => wrap(() => daemon.releasePrClaim(prId)),
 
   listTerminals: (campaignId) => wrap(() => daemon.listTerminals(campaignId)),
-  createTerminal: (campaignId, cwd, label, agentAdapterName, yolo, extraArgs, resumeFromTerminalId) =>
+  createTerminal: (campaignId, cwd, label, agentAdapterName, yolo, extraArgs, resumeFromTerminalId, host) =>
     wrap(() =>
-      daemon.createTerminal(campaignId, cwd, label, agentAdapterName, yolo, extraArgs, resumeFromTerminalId),
+      daemon.createTerminal(campaignId, cwd, label, agentAdapterName, yolo, extraArgs, resumeFromTerminalId, host),
     ),
   killTerminal: (id) => wrap(() => daemon.killTerminal(id)),
   getTerminalByAgentSession: (agentSessionId) => wrap(() => daemon.getTerminalByAgentSession(agentSessionId)),

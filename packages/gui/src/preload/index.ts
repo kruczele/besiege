@@ -112,6 +112,7 @@ const api = {
     yolo: boolean | undefined,
     extraArgs: string | undefined,
     resumeFromTerminalId: number | undefined,
+    host: string | undefined,
   ): Promise<DaemonResult<TerminalSession>> =>
     ipcRenderer.invoke(
       "terminals:create",
@@ -122,6 +123,7 @@ const api = {
       yolo,
       extraArgs,
       resumeFromTerminalId,
+      host,
     ),
   killTerminal: (id: number): Promise<DaemonResult<{ ok: boolean }>> =>
     ipcRenderer.invoke("terminals:kill", id),
