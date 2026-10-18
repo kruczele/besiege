@@ -148,11 +148,14 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
 // agent instead of a dropdown + separate "go" step.
 function PaneLauncher({
   adapters,
+  hosts,
   onLaunch,
   resume,
 }: {
   adapters: AgentAdapter[];
-  onLaunch: (adapterName: string | undefined, yolo: boolean, extraArgs: string) => void;
+  // Online fleet machines to pick from; empty (no fleet) hides the picker.
+  hosts: string[];
+  onLaunch: (adapterName: string | undefined, yolo: boolean, extraArgs: string, host: string | undefined) => void;
   // Present when this pane's previous occupant exited but left behind a
   // resumable agent conversation (resume_flag + agent_session_id) — offers
   // continuing it instead of only falling back to a fresh shell/agent.
@@ -160,6 +163,8 @@ function PaneLauncher({
 }) {
   const [yolo, setYolo] = useState(false);
   const [extraArgs, setExtraArgs] = useState("");
+  const [host, setHost] = useState("");
+  const chosenHost = host || undefined;
 
   return (
     <div className="pane-launcher">
@@ -172,6 +177,21 @@ function PaneLauncher({
         </div>
       )}
       <div className="pane-launcher-options">
+        {hosts.length > 1 && (
+          <select
+            className="pane-launcher-host"
+            title="Machine to run on — Auto lets the fleet pick the least loaded"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+          >
+            <option value="">Auto</option>
+            {hosts.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           className="pane-launcher-args"
           placeholder="extra args"
@@ -188,9 +208,9 @@ function PaneLauncher({
         </button>
       </div>
       <div className="pane-launcher-buttons">
-        <button onClick={() => onLaunch(undefined, false, extraArgs)}>Shell</button>
+        <button onClick={() => onLaunch(undefined, false, extraArgs, chosenHost)}>Shell</button>
         {adapters.map((a) => (
-          <button key={a.name} onClick={() => onLaunch(a.name, yolo, extraArgs)}>
+          <button key={a.name} onClick={() => onLaunch(a.name, yolo, extraArgs, chosenHost)}>
             {a.name}
           </button>
         ))}
@@ -316,6 +336,7 @@ function PaneView({
   sessions,
   titles,
   adapters,
+  hosts,
   claimsBySessionId,
   activePaneId,
   dnd,
@@ -332,6 +353,7 @@ function PaneView({
   sessions: TerminalSession[];
   titles: Record<number, string>;
   adapters: AgentAdapter[];
+  hosts: string[];
   // Keyed by the agent's own session id (TerminalSession.agentSessionId,
   // what claim_pr attributes a claim to) — not the terminal id — so a pane
   // can look up its own agent's claims regardless of which terminal row
@@ -343,7 +365,13 @@ function PaneView({
   onActivate: (paneId: string) => void;
   onSplit: (paneId: string, dir: "row" | "col") => void;
   onClosePane: (paneId: string, sessionId?: number) => void;
-  onLaunch: (paneId: string, adapterName: string | undefined, yolo: boolean, extraArgs: string) => void;
+  onLaunch: (
+    paneId: string,
+    adapterName: string | undefined,
+    yolo: boolean,
+    extraArgs: string,
+    host: string | undefined,
+  ) => void;
   onResume: (paneId: string, terminalId: number) => void;
   onSizesChange: (splitId: string, sizes: number[]) => void;
   onSizesCommit: (splitId: string, sizes: number[]) => void;
@@ -355,6 +383,7 @@ function PaneView({
         sessions={sessions}
         titles={titles}
         adapters={adapters}
+        hosts={hosts}
         claimsBySessionId={claimsBySessionId}
         activePaneId={activePaneId}
         dnd={dnd}
@@ -424,7 +453,11 @@ function PaneView({
       {node.note ? (
         <NotePane note={node.note} />
       ) : node.sessionId === null ? (
-        <PaneLauncher adapters={adapters} onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)} />
+        <PaneLauncher
+          adapters={adapters}
+          hosts={hosts}
+          onLaunch={(adapterName, yolo, extraArgs, host) => onLaunch(node.id, adapterName, yolo, extraArgs, host)}
+        />
       ) : !session ? (
         <p className="status status-pending pane-loading">Loading…</p>
       ) : isExited ? (
@@ -433,7 +466,8 @@ function PaneView({
         // agent conversation again when it's resumable.
         <PaneLauncher
           adapters={adapters}
-          onLaunch={(adapterName, yolo, extraArgs) => onLaunch(node.id, adapterName, yolo, extraArgs)}
+          hosts={hosts}
+          onLaunch={(adapterName, yolo, extraArgs, host) => onLaunch(node.id, adapterName, yolo, extraArgs, host)}
           resume={canResume ? { agentName: adapter!.name, onResume: () => onResume(node.id, session.id) } : undefined}
         />
       ) : (
@@ -531,6 +565,7 @@ export function TerminalsMain({
   const [claims, setClaims] = useState<ActiveClaim[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [adapters, setAdapters] = useState<AgentAdapter[]>([]);
+  const [hosts, setHosts] = useState<string[]>([]);
 
   // Every tab is a saved grid (a TerminalLayout) — there is no "single
   // session" view any more, so activeLayoutId is only ever null transiently
@@ -599,6 +634,16 @@ export function TerminalsMain({
     window.api.listAgentAdapters().then((res) => {
       if (res.ok) setAdapters(res.result);
     });
+  }, []);
+
+  useEffect(() => {
+    const load = () =>
+      window.api.listFleet().then((res) => {
+        if (res.ok) setHosts(res.result.hosts.filter((h) => h.status === "online").map((h) => h.hostId));
+      });
+    void load();
+    const timer = setInterval(() => void load(), 15_000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -679,7 +724,13 @@ export function TerminalsMain({
     if (res.ok) setSessions(res.result);
   };
 
-  const handleLaunch = async (paneId: string, adapterName: string | undefined, yolo: boolean, extraArgs: string) => {
+  const handleLaunch = async (
+    paneId: string,
+    adapterName: string | undefined,
+    yolo: boolean,
+    extraArgs: string,
+    host: string | undefined,
+  ) => {
     if (!activeLayout || campaignId === null) return;
     setError(null);
     if (!campaign?.defaultDir) {
@@ -694,6 +745,7 @@ export function TerminalsMain({
       adapterName ? yolo : undefined,
       adapterName && extraArgs.trim() ? extraArgs.trim() : undefined,
       undefined,
+      host,
     );
     if (!res.ok) {
       setError(res.error);
@@ -717,6 +769,7 @@ export function TerminalsMain({
       undefined,
       undefined,
       terminalId,
+      undefined,
     );
     if (!res.ok) {
       setError(res.error);
@@ -929,6 +982,7 @@ export function TerminalsMain({
             sessions={sessions}
             titles={titles}
             adapters={adapters}
+            hosts={hosts}
             claimsBySessionId={claimsBySessionId}
             activePaneId={activePaneId}
             dnd={

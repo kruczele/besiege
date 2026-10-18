@@ -1499,6 +1499,16 @@ a.pane-pinned-pr-chip:hover {
   gap: 0.4rem;
 }
 
+.pane-launcher-host {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.3rem 0.4rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+}
+
 .pane-launcher-args {
   background: var(--surface);
   border: 1px solid var(--border);

@@ -224,7 +224,8 @@ daemonHandle(
     yolo: boolean | undefined,
     extraArgs: string | undefined,
     resumeFromTerminalId: number | undefined,
-  ) => createTerminal(campaignId, cwd, label, agentAdapterName, yolo, extraArgs, resumeFromTerminalId),
+    host: string | undefined,
+  ) => createTerminal(campaignId, cwd, label, agentAdapterName, yolo, extraArgs, resumeFromTerminalId, host),
 );
 daemonHandle("terminals:kill", (id: number) => killTerminal(id));
 daemonHandle("terminals:byAgentSession", (agentSessionId: string) => getTerminalByAgentSession(agentSessionId));

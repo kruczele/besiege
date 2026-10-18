@@ -237,6 +237,7 @@ export const createTerminal = (
   yolo?: boolean,
   extraArgs?: string,
   resumeFromTerminalId?: number,
+  host?: string,
 ) =>
   callDaemon<TerminalSession>("POST", `/campaigns/${campaignId}/terminals`, {
     cwd,
@@ -245,6 +246,7 @@ export const createTerminal = (
     yolo,
     extraArgs,
     resumeFromTerminalId,
+    host,
   });
 export const getTerminal = (id: number) => callDaemon<TerminalSession>("GET", `/terminals/${id}`);
 export const getTerminalByAgentSession = (agentSessionId: string) =>
