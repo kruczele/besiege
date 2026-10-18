@@ -29,6 +29,11 @@ export interface AgentConfig {
   // starts, polled post-spawn to discover the id for resumeFlag. See
   // terminals.ts. "~" is expanded the same way cwd is.
   sessionIdFromWorkspaceCache?: string;
+  // Same purpose as sessionIdFromWorkspaceCache, for CLIs that persist each
+  // conversation as a rollout-*.jsonl file under a date-sharded directory
+  // (codex: ~/.codex/sessions/YYYY/MM/DD/) whose first line is a
+  // session_meta record carrying the conversation id and cwd.
+  sessionIdFromRolloutDir?: string;
 }
 
 // Same anchor logic as terminals.ts's MCP_ENTRY_POINT: this module runs as

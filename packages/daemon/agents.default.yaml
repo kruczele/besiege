@@ -4,8 +4,8 @@
 # overrides the default entirely, and any other name is just added.
 #
 # Fields: name (required), binary (required), yoloFlag, mcpConfigFlag,
-# sessionIdFlag, resumeFlag, mcpRegisterCommand, sessionIdFromWorkspaceCache
-# (all optional). mcpConfigFlag/sessionIdFlag/resumeFlag are argv templates —
+# sessionIdFlag, resumeFlag, mcpRegisterCommand, sessionIdFromWorkspaceCache,
+# sessionIdFromRolloutDir (all optional). mcpConfigFlag/sessionIdFlag/resumeFlag are argv templates —
 # {path} and {sessionId} get substituted at launch time.
 #
 # mcpRegisterCommand/sessionIdFromWorkspaceCache exist for CLIs that don't
@@ -20,6 +20,12 @@
   mcpConfigFlag: "--mcp-config {path}"
   sessionIdFlag: "--session-id {sessionId}"
   resumeFlag: "--resume {sessionId}"
+- name: Codex
+  binary: codex
+  yoloFlag: --dangerously-bypass-approvals-and-sandbox
+  resumeFlag: "resume {sessionId}"
+  mcpRegisterCommand: "mcp add besiege -- {execPath} {mcpEntryPoint}"
+  sessionIdFromRolloutDir: "~/.codex/sessions"
 - name: OpenCode
   binary: opencode
   yoloFlag: --auto
