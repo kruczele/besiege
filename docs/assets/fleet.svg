@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="560" viewBox="0 0 1100 560" role="img" aria-label="Besiege fleet topology: clients, a control plane and hosts inside a tailnet, with GitHub outside it">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a0f20"/><stop offset="1" stop-color="#141c3a"/></linearGradient>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4cc9f0"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8a97b8"/></marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; fill: #b7c4e0; }
+    .m { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .t { font-size: 17px; font-weight: 700; fill: #ffffff; }
+    .s { font-size: 13px; }
+    .l { font-size: 12px; fill: #8fdcf7; }
+    .box { fill: #0d1428; stroke: #4cc9f0; stroke-width: 1.6; }
+  </style>
+  <rect width="1100" height="560" fill="url(#bg)"/>
+
+  <rect x="30" y="50" width="800" height="490" rx="26" fill="#4cc9f0" fill-opacity="0.03" stroke="#4cc9f0" stroke-opacity="0.6" stroke-width="1.6" stroke-dasharray="8 7"/>
+  <text x="54" y="82" class="m" style="font-size:14px;fill:#4cc9f0">your tailnet — the trust boundary</text>
+
+  <rect x="50" y="130" width="190" height="90" rx="12" class="box"/>
+  <text x="145" y="164" text-anchor="middle" class="t">Clients</text>
+  <text x="145" y="186" text-anchor="middle" class="s">GUI · web UI · phone</text>
+  <text x="145" y="205" text-anchor="middle" class="s m">daemon.sock only</text>
+
+  <rect x="280" y="110" width="300" height="160" rx="14" class="box" style="stroke:#f5b544"/>
+  <text x="430" y="146" text-anchor="middle" class="t" style="fill:#f5b544">Control plane</text>
+  <text x="430" y="175" text-anchor="middle" class="s">SQLite registry · inbox · PR cache</text>
+  <text x="430" y="198" text-anchor="middle" class="s">scheduler  (fleet.yaml)</text>
+  <text x="430" y="221" text-anchor="middle" class="s">terminal stream proxy</text>
+  <text x="430" y="248" text-anchor="middle" class="s m" style="fill:#f5b544">always-on box</text>
+
+  <line x1="240" y1="175" x2="278" y2="175" stroke="#4cc9f0" stroke-width="1.8" marker-end="url(#a)"/>
+
+  <g>
+    <rect x="60" y="360" width="220" height="100" rx="12" class="box"/>
+    <text x="170" y="392" text-anchor="middle" class="t">Host · laptop</text>
+    <text x="170" y="416" text-anchor="middle" class="s">PTYs · agent sessions</text>
+    <text x="170" y="438" text-anchor="middle" class="s m">/exec/*  · heartbeat 5s</text>
+
+    <rect x="320" y="360" width="220" height="100" rx="12" class="box"/>
+    <text x="430" y="392" text-anchor="middle" class="t">Host · WSL box</text>
+    <text x="430" y="416" text-anchor="middle" class="s">PTYs · agent sessions</text>
+    <text x="430" y="438" text-anchor="middle" class="s m">/exec/*  · heartbeat 5s</text>
+
+    <rect x="580" y="360" width="220" height="100" rx="12" class="box" style="stroke:#5b6b91;stroke-dasharray:6 5"/>
+    <text x="690" y="392" text-anchor="middle" class="t" style="fill:#9aa8c8">Host · asleep</text>
+    <text x="690" y="416" text-anchor="middle" class="s">woken on demand</text>
+    <text x="690" y="438" text-anchor="middle" class="s m">Wake-on-LAN / command</text>
+  </g>
+
+  <g stroke="#4cc9f0" stroke-width="1.8" fill="none" stroke-dasharray="6 6" marker-end="url(#a)" marker-start="url(#a)">
+    <path d="M360 272 L200 358"/>
+    <path d="M430 272 L430 358"/>
+  </g>
+  <path d="M500 272 L660 358" stroke="#5b6b91" stroke-width="1.6" fill="none" stroke-dasharray="3 6" marker-end="url(#g)"/>
+  <text x="258" y="304" class="l m" text-anchor="end">placement · heartbeats</text>
+  <text x="440" y="318" class="l m">token-gated</text>
+  <text x="618" y="304" class="l m">wake</text>
+
+  <path d="M170 462 Q300 515 430 462" stroke="#f5b544" stroke-width="1.8" fill="none" stroke-dasharray="4 5" marker-end="url(#a)" marker-start="url(#a)" style="stroke:#f5b544"/>
+  <text x="300" y="530" text-anchor="middle" class="l m" style="fill:#f5b544">shared services · localhost:PORT ⇄ localhost:PORT via /tunnel/:port</text>
+
+  <line x1="580" y1="190" x2="878" y2="190" stroke="#8a97b8" stroke-width="1.8" marker-end="url(#g)"/>
+  <text x="730" y="178" text-anchor="middle" class="l m" style="fill:#aab6d3">batched GraphQL poll</text>
+  <rect x="880" y="145" width="190" height="90" rx="12" class="box" style="stroke:#8a97b8"/>
+  <text x="975" y="180" text-anchor="middle" class="t">GitHub</text>
+  <text x="975" y="203" text-anchor="middle" class="s">PRs · CI · reviews</text>
+  <text x="975" y="221" text-anchor="middle" class="s m" style="fill:#8a97b8">cached, not live</text>
+</svg>
