@@ -80,6 +80,7 @@ export const webApi: Api = {
   deleteConfigRule: (id) => wrap(() => daemon.deleteConfigRule(id)),
 
   listNotifications: (unacknowledgedOnly) => wrap(() => daemon.fetchNotifications(unacknowledgedOnly)),
+  listStatusUpdates: (limit) => wrap(() => daemon.fetchStatusUpdates(limit)),
   acknowledgeNotification: (id) => wrap(() => daemon.acknowledgeNotification(id)),
 
   listCampaigns: (includeArchived) => wrap(() => daemon.fetchCampaigns(includeArchived)),

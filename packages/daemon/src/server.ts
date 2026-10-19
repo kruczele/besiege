@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 import { registerHealthRoute } from "./routes/health.js";
 import { registerConfigRoutes } from "./routes/config.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
+import { registerStatusUpdateRoutes } from "./routes/status-updates.js";
 import { registerCampaignRoutes } from "./routes/campaigns.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerPrRoutes } from "./routes/prs.js";
@@ -84,6 +85,7 @@ export async function buildServer(
   registerHealthRoute(app, db, Date.now());
   registerConfigRoutes(app, db);
   registerNotificationRoutes(app, db);
+  registerStatusUpdateRoutes(app, db);
   registerCampaignRoutes(app, db);
   registerTaskRoutes(app, db);
   registerPrRoutes(app, db, syncPrFn, syncCampaignFn);

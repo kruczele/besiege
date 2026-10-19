@@ -11,6 +11,7 @@ import type {
   FleetOverview,
   FleetServiceInput,
   Notification,
+  StatusUpdate,
   PaneNode,
   PrGridRow,
   TaskDefinition,
@@ -42,6 +43,8 @@ const api = {
 
   listNotifications: (unacknowledgedOnly: boolean): Promise<DaemonResult<Notification[]>> =>
     ipcRenderer.invoke("notifications:list", unacknowledgedOnly),
+  listStatusUpdates: (limit?: number): Promise<DaemonResult<StatusUpdate[]>> =>
+    ipcRenderer.invoke("status-updates:list", limit),
   acknowledgeNotification: (id: number): Promise<DaemonResult<Notification>> =>
     ipcRenderer.invoke("notifications:ack", id),
 

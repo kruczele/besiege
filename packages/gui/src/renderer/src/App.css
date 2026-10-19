@@ -1702,3 +1702,65 @@ a.pane-pinned-pr-chip:hover {
   flex: 1;
   min-width: 0;
 }
+
+.status-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.8rem;
+}
+
+.status-bar-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.status-bar-row .status-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-bar a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.status-bar a:hover {
+  text-decoration: underline;
+}
+
+.status-bar-age {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.status-bar-toggle {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.status-bar-toggle:hover {
+  color: var(--text);
+}
+
+.status-bar-history {
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  max-height: 10rem;
+  overflow-y: auto;
+  color: var(--text-secondary);
+}
+
+.status-bar-history li {
+  padding: 0.15rem 0;
+}

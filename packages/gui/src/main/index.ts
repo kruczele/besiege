@@ -28,6 +28,7 @@ import {
   createTask,
   fetchLayouts,
   fetchNotifications,
+  fetchStatusUpdates,
   fetchRepos,
   fetchSteps,
   fetchTasks,
@@ -167,6 +168,7 @@ daemonHandle("fleet:delete-service", (id: number) => deleteFleetService(id));
 daemonHandle("notifications:list", (unacknowledgedOnly: boolean) =>
   fetchNotifications(unacknowledgedOnly),
 );
+daemonHandle("status-updates:list", (limit?: number) => fetchStatusUpdates(limit));
 daemonHandle("notifications:ack", (id: number) => acknowledgeNotification(id));
 daemonHandle("campaigns:list", (includeArchived?: boolean) => fetchCampaigns(includeArchived));
 daemonHandle("campaigns:steps", (campaignId: number) => fetchSteps(campaignId));

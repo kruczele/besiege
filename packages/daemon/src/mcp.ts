@@ -442,6 +442,26 @@ const TOOLS = [
     },
   },
   {
+    name: "report_status",
+    description:
+      "Leave a one-to-two sentence summary of where things stand — call it each time you finish a piece " +
+      "of work or stop to wait on a human. It appears in the bar at the bottom of the Besiege GUI; when " +
+      "you pass repo and prNumber it renders as \"We were working on <repo>#<n>\" with a clickable link " +
+      "to the PR. Write it for someone who hasn't been following your session.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        summary: {
+          type: "string",
+          description: 'One-two sentences: the current state of the work, e.g. "Added retry to the sender; CI is green, awaiting review."',
+        },
+        repo: { type: "string", description: 'GitHub full name of the PR\'s repo, e.g. "org/repo". Omit if no PR is involved.' },
+        prNumber: { type: "number", description: "The PR number on GitHub. Requires repo." },
+      },
+      required: ["summary"],
+    },
+  },
+  {
     name: "pin_note",
     description:
       "Pin text to a new panel in the GUI grid, opened directly below the pane running this session — " +
@@ -635,6 +655,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (!message) throw new Error("message is required");
         await postJson("/notifications", { sessionId: SESSION_ID, cwd: process.cwd(), message });
         return { content: [{ type: "text", text: "Notification sent." }] };
+      }
+
+      case "report_status": {
+        const { summary, repo, prNumber } = (args ?? {}) as { summary?: string; repo?: string; prNumber?: number };
+        if (!summary) throw new Error("summary is required");
+        await postJson("/status-updates", { sessionId: SESSION_ID, cwd: process.cwd(), summary, repo, prNumber });
+        return { content: [{ type: "text", text: "Status recorded." }] };
       }
 
       case "pin_note": {
