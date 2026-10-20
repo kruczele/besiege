@@ -1764,3 +1764,90 @@ a.pane-pinned-pr-chip:hover {
 .status-bar-history li {
   padding: 0.15rem 0;
 }
+
+
+.pane-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.pane-editor-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-editor-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-editor-note {
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--danger, #e5484d);
+}
+
+.pane-editor-monaco {
+  flex: 1;
+  min-height: 0;
+}
+
+.file-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: min(32rem, 100%);
+  min-height: 0;
+}
+
+.file-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.file-browser-bar .pane-launcher-args {
+  flex: 1;
+  width: auto;
+}
+
+.file-browser-list {
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.file-browser-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.25rem 0.6rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-browser-entry:hover {
+  background: var(--border);
+}

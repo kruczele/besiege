@@ -20,11 +20,20 @@ export interface PaneNote {
   createdAt: string;
 }
 
+// A file open in a Monaco pane. `host` is the machine whose disk holds it
+// (null: whichever daemon serves the request). Like note, mutually exclusive
+// with sessionId.
+export interface PaneEditor {
+  host: string | null;
+  path: string;
+}
+
 export interface PaneLeaf {
   type: "leaf";
   id: string;
   sessionId: number | null;
   note?: PaneNote | null;
+  editor?: PaneEditor | null;
 }
 
 export interface PaneSplit {

@@ -26,7 +26,10 @@ import {
   fetchFleet,
   fetchDaemonHealth,
   createTask,
+  fetchDirectory,
+  fetchFile,
   fetchLayouts,
+  saveFile,
   fetchNotifications,
   fetchStatusUpdates,
   fetchRepos,
@@ -241,6 +244,12 @@ daemonHandle("layouts:create", (campaignId: number, name: string, tree: PaneNode
 );
 daemonHandle("layouts:update", (id: number, fields: Record<string, unknown>) => updateLayout(id, fields));
 daemonHandle("layouts:delete", (id: number) => deleteLayout(id));
+
+daemonHandle("files:list", (host: string | null, path: string) => fetchDirectory(host, path));
+daemonHandle("files:read", (host: string | null, path: string) => fetchFile(host, path));
+daemonHandle("files:write", (host: string | null, path: string, content: string, expectedMtimeMs?: number) =>
+  saveFile(host, path, content, expectedMtimeMs),
+);
 
 ipcMain.handle("terminal:open", (event, id: number) => {
   terminalBridge.attach(event.sender, id);

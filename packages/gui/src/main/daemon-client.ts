@@ -8,7 +8,9 @@ import type {
   CampaignStep,
   ConfigRule,
   DaemonHealth,
+  DirListing,
   FailureSignature,
+  FileContent,
   FleetOverview,
   FleetService,
   FleetServiceInput,
@@ -64,7 +66,11 @@ function callDaemon<T>(method: "GET" | "POST" | "DELETE" | "PATCH", path: string
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
           if (!res.statusCode || res.statusCode >= 300) {
-            reject(new Error(`daemon responded with ${res.statusCode}`));
+            let detail: string | undefined;
+            try {
+              detail = (JSON.parse(data) as { error?: string }).error;
+            } catch {}
+            reject(new Error(detail ?? `daemon responded with ${res.statusCode}`));
             return;
           }
           try {
@@ -270,3 +276,12 @@ export const createLayout = (campaignId: number, name: string, tree: PaneNode) =
 export const updateLayout = (id: number, fields: Partial<{ name: string; isNameCustom: boolean; tree: PaneNode }>) =>
   callDaemon<TerminalLayout>("PATCH", `/layouts/${id}`, fields);
 export const deleteLayout = (id: number) => callDaemon<void>("DELETE", `/layouts/${id}`);
+
+// Files for the editor pane. `host` picks the machine whose disk is read or
+// written; the daemon relays to that peer when it isn't its own.
+export const fetchFile = (host: string | null, path: string) =>
+  callDaemon<FileContent>("GET", `/files?${new URLSearchParams({ ...(host ? { host } : {}), path })}`);
+export const saveFile = (host: string | null, path: string, content: string, expectedMtimeMs?: number) =>
+  callDaemon<FileContent>("PUT", "/files", { host: host ?? undefined, path, content, expectedMtimeMs });
+export const fetchDirectory = (host: string | null, path: string) =>
+  callDaemon<DirListing>("GET", `/files/list?${new URLSearchParams({ ...(host ? { host } : {}), path })}`);

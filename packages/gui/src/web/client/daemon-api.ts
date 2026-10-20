@@ -9,6 +9,8 @@ import type {
   CampaignStep,
   ConfigRule,
   DaemonHealth,
+  DirListing,
+  FileContent,
   FleetOverview,
   FleetServiceInput,
   Notification,
@@ -26,8 +28,15 @@ async function callDaemon<T>(method: "GET" | "POST" | "DELETE" | "PATCH", path: 
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`daemon responded with ${res.status}`);
   const text = await res.text();
+  if (!res.ok) {
+    // Routes that explain themselves ({error}) — the editor shows these.
+    let detail: string | undefined;
+    try {
+      detail = (JSON.parse(text) as { error?: string }).error;
+    } catch {}
+    throw new Error(detail ?? `daemon responded with ${res.status}`);
+  }
   return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
@@ -143,3 +152,10 @@ export const createLayout = (campaignId: number, name: string, tree: PaneNode) =
 export const updateLayout = (id: number, fields: Partial<{ name: string; isNameCustom: boolean; tree: PaneNode }>) =>
   callDaemon<TerminalLayout>("PATCH", `/layouts/${id}`, fields);
 export const deleteLayout = (id: number) => callDaemon<void>("DELETE", `/layouts/${id}`);
+
+export const fetchFile = (host: string | null, path: string) =>
+  callDaemon<FileContent>("GET", `/files?${new URLSearchParams({ ...(host ? { host } : {}), path })}`);
+export const saveFile = (host: string | null, path: string, content: string, expectedMtimeMs?: number) =>
+  callDaemon<FileContent>("PUT", "/files", { host: host ?? undefined, path, content, expectedMtimeMs });
+export const fetchDirectory = (host: string | null, path: string) =>
+  callDaemon<DirListing>("GET", `/files/list?${new URLSearchParams({ ...(host ? { host } : {}), path })}`);

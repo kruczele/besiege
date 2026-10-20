@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { Copy, GripVertical, LayoutGrid, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
+import { ArrowUp, Copy, File as FileIcon, Folder, GripVertical, LayoutGrid, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
 import type {
   ActiveClaim,
   AgentAdapter,
   Campaign,
+  DirListing,
+  PaneEditor,
   PaneNode,
   PaneNote,
   TerminalLayout,
@@ -21,6 +23,7 @@ import {
   findLeaf,
   insertBeside,
   leavesInOrder,
+  setPaneEditor,
   setPaneSession,
   setSizes,
   splitPane,
@@ -28,6 +31,9 @@ import {
 } from "./pane-tree.js";
 
 const POLL_SESSIONS = 3000;
+
+// Monaco is several MB; terminal-only sessions never load it.
+const EditorView = lazy(() => import("./Editor.js"));
 
 // Reserved so the shell/agent inside a pane never sees these keystrokes —
 // TerminalView's attachCustomKeyEventHandler blocks them from reaching the
@@ -144,18 +150,100 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
   return <div className="terminal-viewport" ref={containerRef} />;
 }
 
+// Directory picker for the Editor launcher: a path bar over the listing.
+// Clicking a folder enters it, a file opens it. `host` is the machine whose
+// disk is browsed; changing it re-lists, falling back to ~ when the current
+// directory doesn't exist there.
+function FileBrowser({
+  host,
+  startDir,
+  onOpen,
+  onCancel,
+}: {
+  host: string | null;
+  startDir: string;
+  onOpen: (path: string) => void;
+  onCancel: () => void;
+}) {
+  const [listing, setListing] = useState<DirListing | null>(null);
+  const [pathInput, setPathInput] = useState(startDir);
+  const [error, setError] = useState<string | null>(null);
+  const requestRef = useRef(0);
+
+  const go = async (path: string, fallback?: string) => {
+    const request = ++requestRef.current;
+    let res = await window.api.listDirectory(host, path);
+    if (!res.ok && fallback) res = await window.api.listDirectory(host, fallback);
+    if (request !== requestRef.current) return;
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError(null);
+    setListing(res.result);
+    setPathInput(res.result.path);
+  };
+
+  useEffect(() => {
+    void go(listing?.path ?? startDir, "~");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host]);
+
+  const join = (name: string) => `${listing!.path.replace(/\/$/, "")}/${name}`;
+
+  return (
+    <div className="file-browser">
+      <div className="file-browser-bar">
+        <button title="Parent folder" disabled={!listing?.parent} onClick={() => listing?.parent && void go(listing.parent)}>
+          <ArrowUp size={13} />
+        </button>
+        <input
+          className="pane-launcher-args"
+          value={pathInput}
+          placeholder="/absolute/path"
+          onChange={(e) => setPathInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void go(pathInput.trim());
+            if (e.key === "Escape") onCancel();
+          }}
+        />
+        <button onClick={onCancel}>Cancel</button>
+      </div>
+      {error && <p className="status status-down">{error}</p>}
+      <div className="file-browser-list">
+        {listing?.entries.map((entry) => (
+          <button
+            key={entry.name}
+            className="file-browser-entry"
+            onClick={() => (entry.kind === "dir" ? void go(join(entry.name)) : onOpen(join(entry.name)))}
+          >
+            {entry.kind === "dir" ? <Folder size={13} /> : <FileIcon size={13} />}
+            {entry.name}
+          </button>
+        ))}
+        {listing && listing.entries.length === 0 && <p className="status status-pending">Empty folder</p>}
+      </div>
+    </div>
+  );
+}
+
 // The button row shown inside an empty pane — direct one-click launch per
 // agent instead of a dropdown + separate "go" step.
 function PaneLauncher({
   adapters,
   hosts,
+  defaultDir,
   onLaunch,
+  onOpenEditor,
   resume,
 }: {
   adapters: AgentAdapter[];
   // Online fleet machines to pick from; empty (no fleet) hides the picker.
   hosts: string[];
+  // Pre-fills the editor's path prompt.
+  defaultDir: string | null;
   onLaunch: (adapterName: string | undefined, yolo: boolean, extraArgs: string, host: string | undefined) => void;
+  onOpenEditor: (editor: PaneEditor) => void;
   // Present when this pane's previous occupant exited but left behind a
   // resumable agent conversation (resume_flag + agent_session_id) — offers
   // continuing it instead of only falling back to a fresh shell/agent.
@@ -165,6 +253,7 @@ function PaneLauncher({
   const [extraArgs, setExtraArgs] = useState("");
   const [host, setHost] = useState("");
   const chosenHost = host || undefined;
+  const [browsing, setBrowsing] = useState(false);
 
   return (
     <div className="pane-launcher">
@@ -214,7 +303,18 @@ function PaneLauncher({
             {a.name}
           </button>
         ))}
+        <button onClick={() => setBrowsing(true)}>Editor</button>
       </div>
+      {browsing && (
+        <FileBrowser
+          // "Auto" has no meaning for a file: it lives on a specific machine,
+          // and with no pick that is the daemon this GUI talks to.
+          host={chosenHost ?? null}
+          startDir={defaultDir ?? "~"}
+          onOpen={(path) => onOpenEditor({ host: chosenHost ?? null, path })}
+          onCancel={() => setBrowsing(false)}
+        />
+      )}
     </div>
   );
 }
@@ -337,6 +437,7 @@ function PaneView({
   titles,
   adapters,
   hosts,
+  defaultDir,
   claimsBySessionId,
   activePaneId,
   dnd,
@@ -345,6 +446,7 @@ function PaneView({
   onSplit,
   onClosePane,
   onLaunch,
+  onOpenEditor,
   onResume,
   onSizesChange,
   onSizesCommit,
@@ -354,6 +456,7 @@ function PaneView({
   titles: Record<number, string>;
   adapters: AgentAdapter[];
   hosts: string[];
+  defaultDir: string | null;
   // Keyed by the agent's own session id (TerminalSession.agentSessionId,
   // what claim_pr attributes a claim to) — not the terminal id — so a pane
   // can look up its own agent's claims regardless of which terminal row
@@ -372,6 +475,7 @@ function PaneView({
     extraArgs: string,
     host: string | undefined,
   ) => void;
+  onOpenEditor: (paneId: string, editor: PaneEditor) => void;
   onResume: (paneId: string, terminalId: number) => void;
   onSizesChange: (splitId: string, sizes: number[]) => void;
   onSizesCommit: (splitId: string, sizes: number[]) => void;
@@ -384,6 +488,7 @@ function PaneView({
         titles={titles}
         adapters={adapters}
         hosts={hosts}
+        defaultDir={defaultDir}
         claimsBySessionId={claimsBySessionId}
         activePaneId={activePaneId}
         dnd={dnd}
@@ -392,6 +497,7 @@ function PaneView({
         onSplit={onSplit}
         onClosePane={onClosePane}
         onLaunch={onLaunch}
+        onOpenEditor={onOpenEditor}
         onResume={onResume}
         onSizesChange={onSizesChange}
         onSizesCommit={onSizesCommit}
@@ -420,7 +526,7 @@ function PaneView({
       >
         {dnd && <GripVertical size={13} className="terminal-grid-pane-grip" />}
         <span className={`terminal-grid-pane-title ${isExited ? "exited" : ""}`}>
-          {node.note ? node.note.title : session ? titles[session.id] ?? session.label ?? `Terminal #${session.id}` : "Empty"}
+          {node.note ? node.note.title : node.editor ? node.editor.path.split("/").pop() : session ? titles[session.id] ?? session.label ?? `Terminal #${session.id}` : "Empty"}
         </span>
         {session?.fleetPlaced && (
           <span className="terminal-grid-pane-host" title={session.placementNote ?? undefined}>
@@ -452,11 +558,17 @@ function PaneView({
       )}
       {node.note ? (
         <NotePane note={node.note} />
+      ) : node.editor ? (
+        <Suspense fallback={<p className="status status-pending pane-loading">Loading editor…</p>}>
+          <EditorView editor={node.editor} />
+        </Suspense>
       ) : node.sessionId === null ? (
         <PaneLauncher
           adapters={adapters}
           hosts={hosts}
+          defaultDir={defaultDir}
           onLaunch={(adapterName, yolo, extraArgs, host) => onLaunch(node.id, adapterName, yolo, extraArgs, host)}
+          onOpenEditor={(editor) => onOpenEditor(node.id, editor)}
         />
       ) : !session ? (
         <p className="status status-pending pane-loading">Loading…</p>
@@ -467,7 +579,9 @@ function PaneView({
         <PaneLauncher
           adapters={adapters}
           hosts={hosts}
+          defaultDir={defaultDir}
           onLaunch={(adapterName, yolo, extraArgs, host) => onLaunch(node.id, adapterName, yolo, extraArgs, host)}
+          onOpenEditor={(editor) => onOpenEditor(node.id, editor)}
           resume={canResume ? { agentName: adapter!.name, onResume: () => onResume(node.id, session.id) } : undefined}
         />
       ) : (
@@ -755,6 +869,11 @@ export function TerminalsMain({
     persistTree(activeLayout.id, setPaneSession(activeLayout.tree, paneId, res.result.id));
   };
 
+  const handleOpenEditor = (paneId: string, editor: PaneEditor) => {
+    if (!activeLayout) return;
+    persistTree(activeLayout.id, setPaneEditor(activeLayout.tree, paneId, editor));
+  };
+
   // Manual counterpart to the daemon's boot-time auto-resume: relaunches the
   // same agent conversation (adapter/cwd/yolo/extraArgs all come from the
   // prior row server-side) from a pane whose agent process has exited.
@@ -983,6 +1102,7 @@ export function TerminalsMain({
             titles={titles}
             adapters={adapters}
             hosts={hosts}
+            defaultDir={campaign?.defaultDir ?? null}
             claimsBySessionId={claimsBySessionId}
             activePaneId={activePaneId}
             dnd={
@@ -1003,6 +1123,7 @@ export function TerminalsMain({
             onSplit={handleSplit}
             onClosePane={handleClosePane}
             onLaunch={handleLaunch}
+            onOpenEditor={handleOpenEditor}
             onResume={handleResume}
             onSizesChange={handleSizesChange}
             onSizesCommit={handleSizesCommit}
