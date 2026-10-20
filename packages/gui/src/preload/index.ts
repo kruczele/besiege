@@ -15,6 +15,7 @@ import type {
   PaneNode,
   PrGridRow,
   TaskDefinition,
+  FileContent,
   TerminalLayout,
   TerminalSession,
 } from "../shared/types.js";
@@ -146,6 +147,15 @@ const api = {
     fields: Partial<{ name: string; isNameCustom: boolean; tree: PaneNode }>,
   ): Promise<DaemonResult<TerminalLayout>> => ipcRenderer.invoke("layouts:update", id, fields),
   deleteLayout: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("layouts:delete", id),
+
+  readFile: (host: string | null, path: string): Promise<DaemonResult<FileContent>> =>
+    ipcRenderer.invoke("files:read", host, path),
+  writeFile: (
+    host: string | null,
+    path: string,
+    content: string,
+    expectedMtimeMs?: number,
+  ): Promise<DaemonResult<FileContent>> => ipcRenderer.invoke("files:write", host, path, content, expectedMtimeMs),
 
   // Live PTY streaming: openTerminalStream tells main to attach the WS to the
   // daemon (idempotent — safe to call again on remount); attachTerminal wires

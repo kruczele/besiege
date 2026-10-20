@@ -12,6 +12,7 @@ import { registerFailureRoutes } from "./routes/failures.js";
 import { registerTerminalRoutes } from "./routes/terminals.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerLayoutRoutes } from "./routes/layouts.js";
+import { registerFileRoutes } from "./routes/files.js";
 import { registerExecRoutes } from "./routes/exec.js";
 import { registerFleetRoutes } from "./routes/fleet.js";
 import { registerTunnelRoutes } from "./routes/tunnel.js";
@@ -94,6 +95,7 @@ export async function buildServer(
   registerAgentRoutes(app);
   registerLayoutRoutes(app, db);
   registerExecRoutes(app);
+  registerFileRoutes(app);
   registerFleetRoutes(app, db);
   registerTunnelRoutes(app);
 

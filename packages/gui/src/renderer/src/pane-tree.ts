@@ -2,7 +2,7 @@
 // shared: different runtime/build target) packages/daemon/src/layout-tree.ts,
 // which owns the authoritative versions used for server-side persistence and
 // the boot-time resume rewrite.
-import type { PaneLeaf, PaneNode, PaneSplit } from "../../shared/types.js";
+import type { PaneEditor, PaneLeaf, PaneNode, PaneSplit } from "../../shared/types.js";
 
 export function emptyLeaf(): PaneLeaf {
   return { type: "leaf", id: crypto.randomUUID(), sessionId: null };
@@ -102,6 +102,11 @@ export function closePane(node: PaneNode, targetId: string): PaneNode | null {
 export function setPaneSession(node: PaneNode, targetId: string, sessionId: number): PaneNode {
   if (node.type === "leaf") return node.id === targetId ? { ...node, sessionId } : node;
   return { ...node, children: node.children.map((c) => setPaneSession(c, targetId, sessionId)) };
+}
+
+export function setPaneEditor(node: PaneNode, targetId: string, editor: PaneEditor): PaneNode {
+  if (node.type === "leaf") return node.id === targetId ? { ...node, editor } : node;
+  return { ...node, children: node.children.map((c) => setPaneEditor(c, targetId, editor)) };
 }
 
 export function setSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {

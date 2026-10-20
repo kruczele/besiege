@@ -1764,3 +1764,47 @@ a.pane-pinned-pr-chip:hover {
 .status-bar-history li {
   padding: 0.15rem 0;
 }
+
+.pane-launcher-path {
+  width: 22rem;
+}
+
+.pane-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.pane-editor-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-editor-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-editor-note {
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--danger, #e5484d);
+}
+
+.pane-editor-monaco {
+  flex: 1;
+  min-height: 0;
+}
