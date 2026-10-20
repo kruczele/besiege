@@ -1,7 +1,7 @@
 // What every host exposes so a control plane can run sessions on it. Only
 // reachable remotely through the token-gated TCP listener (server.ts).
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { FileError, readTextFile, writeTextFile } from "../files.js";
+import { FileError, listDirectory, readTextFile, writeTextFile } from "../files.js";
 import type { WakeConfig } from "../fleet-config.js";
 import * as ptyHost from "../pty-host.js";
 import { LaunchError, type LaunchSpec } from "../pty-host.js";
@@ -51,6 +51,14 @@ export function registerExecRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { path?: string } }>("/exec/files", async (req, reply) => {
     try {
       return await readTextFile(req.query.path ?? "");
+    } catch (err) {
+      return fileFailure(reply, err);
+    }
+  });
+
+  app.get<{ Querystring: { path?: string } }>("/exec/files/list", async (req, reply) => {
+    try {
+      return await listDirectory(req.query.path ?? "");
     } catch (err) {
       return fileFailure(reply, err);
     }

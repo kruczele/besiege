@@ -126,6 +126,17 @@ export interface PaneLeaf {
   editor?: PaneEditor | null;
 }
 
+export interface DirEntry {
+  name: string;
+  kind: "dir" | "file";
+}
+
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  entries: DirEntry[];
+}
+
 export interface FileContent {
   path: string;
   content: string;

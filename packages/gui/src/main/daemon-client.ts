@@ -8,6 +8,7 @@ import type {
   CampaignStep,
   ConfigRule,
   DaemonHealth,
+  DirListing,
   FailureSignature,
   FileContent,
   FleetOverview,
@@ -282,3 +283,5 @@ export const fetchFile = (host: string | null, path: string) =>
   callDaemon<FileContent>("GET", `/files?${new URLSearchParams({ ...(host ? { host } : {}), path })}`);
 export const saveFile = (host: string | null, path: string, content: string, expectedMtimeMs?: number) =>
   callDaemon<FileContent>("PUT", "/files", { host: host ?? undefined, path, content, expectedMtimeMs });
+export const fetchDirectory = (host: string | null, path: string) =>
+  callDaemon<DirListing>("GET", `/files/list?${new URLSearchParams({ ...(host ? { host } : {}), path })}`);

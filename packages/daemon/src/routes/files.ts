@@ -2,10 +2,10 @@
 // serves the local disk itself or relays to the peer that owns it, the same
 // way terminal streams are relayed (routes/terminals.ts).
 import type { FastifyInstance } from "fastify";
-import { readTextFile, writeTextFile } from "../files.js";
+import { listDirectory, readTextFile, writeTextFile } from "../files.js";
 import { fleetToken, hostUrl } from "../fleet.js";
 import { hostId as selfId } from "../host.js";
-import { readFileRemote, RemoteFileError, writeFileRemote } from "../remote-exec.js";
+import { listDirectoryRemote, readFileRemote, RemoteFileError, writeFileRemote } from "../remote-exec.js";
 import { fileFailure } from "./exec.js";
 
 function remoteTarget(host: string | undefined): { url: string } | null {
@@ -21,6 +21,16 @@ export function registerFileRoutes(app: FastifyInstance) {
       const path = req.query.path ?? "";
       const remote = remoteTarget(req.query.host);
       return remote ? await readFileRemote(remote.url, fleetToken(), path) : await readTextFile(path);
+    } catch (err) {
+      return relayFailure(reply, err);
+    }
+  });
+
+  app.get<{ Querystring: { host?: string; path?: string } }>("/files/list", async (req, reply) => {
+    try {
+      const path = req.query.path ?? "";
+      const remote = remoteTarget(req.query.host);
+      return remote ? await listDirectoryRemote(remote.url, fleetToken(), path) : await listDirectory(path);
     } catch (err) {
       return relayFailure(reply, err);
     }

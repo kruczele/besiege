@@ -1,7 +1,7 @@
 // The control plane's side of /exec/* (routes/exec.ts) on another host.
 import { WebSocket } from "ws";
 import type { WakeConfig } from "./fleet-config.js";
-import type { FileContent } from "./files.js";
+import type { DirListing, FileContent } from "./files.js";
 import { LaunchError, type ExecRecord, type LaunchSpec } from "./pty-host.js";
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -65,4 +65,8 @@ export function writeFileRemote(
   body: { path: string; content: string; expectedMtimeMs?: number },
 ): Promise<FileContent> {
   return call<FileContent>(baseUrl, token, "PUT", "/exec/files", body);
+}
+
+export function listDirectoryRemote(baseUrl: string, token: string, path: string): Promise<DirListing> {
+  return call<DirListing>(baseUrl, token, "GET", `/exec/files/list?path=${encodeURIComponent(path)}`);
 }

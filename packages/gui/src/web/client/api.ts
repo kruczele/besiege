@@ -125,6 +125,7 @@ export const webApi: Api = {
   createLayout: (campaignId, name, tree) => wrap(() => daemon.createLayout(campaignId, name, tree)),
   updateLayout: (id, fields) => wrap(() => daemon.updateLayout(id, fields)),
   deleteLayout: (id) => wrap(() => daemon.deleteLayout(id)),
+  listDirectory: (host, path) => wrap(() => daemon.fetchDirectory(host, path)),
   readFile: (host, path) => wrap(() => daemon.fetchFile(host, path)),
   writeFile: (host, path, content, expectedMtimeMs) => wrap(() => daemon.saveFile(host, path, content, expectedMtimeMs)),
 

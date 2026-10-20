@@ -15,6 +15,7 @@ import type {
   PaneNode,
   PrGridRow,
   TaskDefinition,
+  DirListing,
   FileContent,
   TerminalLayout,
   TerminalSession,
@@ -148,6 +149,8 @@ const api = {
   ): Promise<DaemonResult<TerminalLayout>> => ipcRenderer.invoke("layouts:update", id, fields),
   deleteLayout: (id: number): Promise<DaemonResult<void>> => ipcRenderer.invoke("layouts:delete", id),
 
+  listDirectory: (host: string | null, path: string): Promise<DaemonResult<DirListing>> =>
+    ipcRenderer.invoke("files:list", host, path),
   readFile: (host: string | null, path: string): Promise<DaemonResult<FileContent>> =>
     ipcRenderer.invoke("files:read", host, path),
   writeFile: (

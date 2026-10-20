@@ -1,5 +1,5 @@
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute } from "node:path";
 import { expandHome } from "./pty-host.js";
 
 // Monaco holds the whole buffer in memory and the payload crosses IPC/HTTP as
@@ -53,4 +53,38 @@ export async function writeTextFile(path: string, content: string, expectedMtime
 
   await writeFile(resolved, content, "utf8");
   return { path: resolved, content, mtimeMs: (await stat(resolved)).mtimeMs };
+}
+
+export interface DirEntry {
+  name: string;
+  kind: "dir" | "file";
+}
+
+export interface DirListing {
+  path: string;
+  // Null at the filesystem root.
+  parent: string | null;
+  entries: DirEntry[];
+}
+
+export async function listDirectory(path: string): Promise<DirListing> {
+  const resolved = resolvePath(path);
+  const info = await stat(resolved).catch(() => null);
+  if (!info) throw new FileError(`${resolved} does not exist`, 404);
+  if (!info.isDirectory()) throw new FileError(`${resolved} is not a directory`, 400);
+
+  const dirents = await readdir(resolved, { withFileTypes: true }).catch(() => {
+    throw new FileError(`cannot read ${resolved}`, 400);
+  });
+  // A symlink is classified by what it points at, so a linked directory can
+  // be entered; a dangling one is listed as a file and fails on open.
+  const entries = await Promise.all(
+    dirents.map(async (d): Promise<DirEntry> => {
+      const isDir = d.isDirectory() || (d.isSymbolicLink() && (await stat(`${resolved}/${d.name}`).catch(() => null))?.isDirectory());
+      return { name: d.name, kind: isDir ? "dir" : "file" };
+    }),
+  );
+  entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1));
+  const parent = dirname(resolved);
+  return { path: resolved, parent: parent === resolved ? null : parent, entries };
 }

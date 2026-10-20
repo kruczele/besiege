@@ -4,11 +4,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { Copy, GripVertical, LayoutGrid, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
+import { ArrowUp, Copy, File as FileIcon, Folder, GripVertical, LayoutGrid, PanelBottomOpen, PanelRightOpen, Plus, X } from "lucide-react";
 import type {
   ActiveClaim,
   AgentAdapter,
   Campaign,
+  DirListing,
   PaneEditor,
   PaneNode,
   PaneNote,
@@ -149,6 +150,83 @@ function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) =>
   return <div className="terminal-viewport" ref={containerRef} />;
 }
 
+// Directory picker for the Editor launcher: a path bar over the listing.
+// Clicking a folder enters it, a file opens it. `host` is the machine whose
+// disk is browsed; changing it re-lists, falling back to ~ when the current
+// directory doesn't exist there.
+function FileBrowser({
+  host,
+  startDir,
+  onOpen,
+  onCancel,
+}: {
+  host: string | null;
+  startDir: string;
+  onOpen: (path: string) => void;
+  onCancel: () => void;
+}) {
+  const [listing, setListing] = useState<DirListing | null>(null);
+  const [pathInput, setPathInput] = useState(startDir);
+  const [error, setError] = useState<string | null>(null);
+  const requestRef = useRef(0);
+
+  const go = async (path: string, fallback?: string) => {
+    const request = ++requestRef.current;
+    let res = await window.api.listDirectory(host, path);
+    if (!res.ok && fallback) res = await window.api.listDirectory(host, fallback);
+    if (request !== requestRef.current) return;
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setError(null);
+    setListing(res.result);
+    setPathInput(res.result.path);
+  };
+
+  useEffect(() => {
+    void go(listing?.path ?? startDir, "~");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host]);
+
+  const join = (name: string) => `${listing!.path.replace(/\/$/, "")}/${name}`;
+
+  return (
+    <div className="file-browser">
+      <div className="file-browser-bar">
+        <button title="Parent folder" disabled={!listing?.parent} onClick={() => listing?.parent && void go(listing.parent)}>
+          <ArrowUp size={13} />
+        </button>
+        <input
+          className="pane-launcher-args"
+          value={pathInput}
+          placeholder="/absolute/path"
+          onChange={(e) => setPathInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void go(pathInput.trim());
+            if (e.key === "Escape") onCancel();
+          }}
+        />
+        <button onClick={onCancel}>Cancel</button>
+      </div>
+      {error && <p className="status status-down">{error}</p>}
+      <div className="file-browser-list">
+        {listing?.entries.map((entry) => (
+          <button
+            key={entry.name}
+            className="file-browser-entry"
+            onClick={() => (entry.kind === "dir" ? void go(join(entry.name)) : onOpen(join(entry.name)))}
+          >
+            {entry.kind === "dir" ? <Folder size={13} /> : <FileIcon size={13} />}
+            {entry.name}
+          </button>
+        ))}
+        {listing && listing.entries.length === 0 && <p className="status status-pending">Empty folder</p>}
+      </div>
+    </div>
+  );
+}
+
 // The button row shown inside an empty pane — direct one-click launch per
 // agent instead of a dropdown + separate "go" step.
 function PaneLauncher({
@@ -175,15 +253,7 @@ function PaneLauncher({
   const [extraArgs, setExtraArgs] = useState("");
   const [host, setHost] = useState("");
   const chosenHost = host || undefined;
-  const [editorPath, setEditorPath] = useState<string | null>(null);
-
-  const openEditor = () => {
-    const path = editorPath?.trim();
-    if (!path) return;
-    // "Auto" has no meaning for a file: it lives on a specific machine, and
-    // with no pick that is the daemon this GUI talks to.
-    onOpenEditor({ host: chosenHost ?? null, path });
-  };
+  const [browsing, setBrowsing] = useState(false);
 
   return (
     <div className="pane-launcher">
@@ -233,25 +303,17 @@ function PaneLauncher({
             {a.name}
           </button>
         ))}
-        <button onClick={() => setEditorPath((cur) => cur ?? (defaultDir ? `${defaultDir.replace(/\/$/, "")}/` : ""))}>
-          Editor
-        </button>
+        <button onClick={() => setBrowsing(true)}>Editor</button>
       </div>
-      {editorPath !== null && (
-        <div className="pane-launcher-options">
-          <input
-            className="pane-launcher-args pane-launcher-path"
-            autoFocus
-            placeholder="/absolute/path/to/file"
-            value={editorPath}
-            onChange={(e) => setEditorPath(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") openEditor();
-              if (e.key === "Escape") setEditorPath(null);
-            }}
-          />
-          <button onClick={openEditor}>Open</button>
-        </div>
+      {browsing && (
+        <FileBrowser
+          // "Auto" has no meaning for a file: it lives on a specific machine,
+          // and with no pick that is the daemon this GUI talks to.
+          host={chosenHost ?? null}
+          startDir={defaultDir ?? "~"}
+          onOpen={(path) => onOpenEditor({ host: chosenHost ?? null, path })}
+          onCancel={() => setBrowsing(false)}
+        />
       )}
     </div>
   );
