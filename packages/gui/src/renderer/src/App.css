@@ -1770,8 +1770,31 @@ a.pane-pinned-pr-chip:hover {
   flex: 1;
   min-height: 0;
   display: flex;
-  flex-direction: column;
   background: var(--bg);
+}
+
+.pane-editor-tree {
+  flex-shrink: 0;
+  width: 14rem;
+  display: flex;
+  border-right: 1px solid var(--border);
+}
+
+.pane-editor-tree .file-browser {
+  width: 100%;
+  padding: 0.35rem;
+}
+
+.pane-editor-tree .file-browser-list {
+  flex: 1;
+  max-height: none;
+}
+
+.pane-editor-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .pane-editor-bar {
@@ -1848,6 +1871,7 @@ a.pane-pinned-pr-chip:hover {
   cursor: pointer;
 }
 
-.file-browser-entry:hover {
+.file-browser-entry:hover,
+.file-browser-entry.active {
   background: var(--border);
 }
