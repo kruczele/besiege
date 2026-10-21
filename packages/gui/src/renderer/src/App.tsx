@@ -26,7 +26,6 @@ import type {
   FleetHost,
   FleetOverview,
   Notification,
-  StatusUpdate,
   PrGridRow,
   TaskDefinition,
   TerminalSession,
@@ -213,79 +212,6 @@ export function App({ chrome = true }: { chrome?: boolean } = {}) {
             onActiveSessionChange={setActiveSessionId}
           />
         </main>
-      </div>
-      <StatusBar />
-    </div>
-  );
-}
-
-// Agent-written "where things stand" summaries (report_status MCP tool, fed
-// by the global edict) — newest in the bar, a few more behind the toggle.
-function StatusLine({ update }: { update: StatusUpdate }) {
-  return (
-    <span className="status-line">
-      {update.repo && update.prNumber && update.prUrl ? (
-        <>
-          We were working on{" "}
-          <a
-            href={update.prUrl}
-            onClick={(e) => {
-              e.preventDefault();
-              void window.api.openExternal(update.prUrl!);
-            }}
-          >
-            {update.repo}#{update.prNumber}
-          </a>
-          :{" "}
-        </>
-      ) : update.repo ? (
-        <>We were working on {update.repo}: </>
-      ) : null}
-      {update.summary}
-    </span>
-  );
-}
-
-function StatusBar() {
-  const [updates, setUpdates] = useState<StatusUpdate[]>([]);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      const res = await window.api.listStatusUpdates(10);
-      if (!cancelled && res.ok) setUpdates(res.result);
-    };
-    poll();
-    const id = setInterval(poll, POLL_FAST);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  if (updates.length === 0) return null;
-  const [latest, ...older] = updates;
-
-  return (
-    <div className="status-bar">
-      {open && older.length > 0 && (
-        <ul className="status-bar-history">
-          {older.map((u) => (
-            <li key={u.id}>
-              <StatusLine update={u} /> <span className="status-bar-age">{elapsed(u.createdAt)} ago</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="status-bar-row">
-        <StatusLine update={latest} />
-        <span className="status-bar-age">{elapsed(latest.createdAt)} ago</span>
-        {older.length > 0 && (
-          <button className="status-bar-toggle" onClick={() => setOpen((o) => !o)}>
-            {open ? "Hide earlier" : "Earlier"}
-          </button>
-        )}
       </div>
     </div>
   );

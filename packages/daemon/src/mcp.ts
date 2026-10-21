@@ -445,7 +445,7 @@ const TOOLS = [
     name: "report_status",
     description:
       "Leave a one-to-two sentence summary of where things stand — call it each time you finish a piece " +
-      "of work or stop to wait on a human. It appears in the bar at the bottom of the Besiege GUI; when " +
+      "of work or stop to wait on a human. It appears in the bar at the bottom of this session's pane in the Besiege GUI; when " +
       "you pass repo and prNumber it renders as \"We were working on <repo>#<n>\" with a clickable link " +
       "to the PR. Write it for someone who hasn't been following your session.",
     inputSchema: {
