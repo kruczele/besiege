@@ -33,7 +33,7 @@ It works with **Claude Code**, **Codex**, **OpenCode** and **Antigravity (`agy`)
 | 🔀 **PR board** | Every PR touching a pinned repo, grouped by branch, then CI and review state. Batched GraphQL polling, rate-limit-safe at 1,200+ PRs. |
 | 📥 **Inbox** | Agent sessions that are blocked, waiting or done relay into one board, so you don't have to notice a specific terminal. |
 | 📜 **Edicts** | Your own path-scoped instructions for how agents behave under a directory glob, injected through the `SessionStart` hook. They never touch a shared `CLAUDE.md`/`AGENTS.md`, so they can't collide with a teammate's session. |
-| 💬 **Status bar** | A seeded edict has agents call the `report_status` MCP tool whenever they finish something; the newest one-two sentence summary ("We were working on org/repo#42: …", with a link to the PR) sits in a bar at the bottom of that agent's own pane in the GUI grid. |
+| 💬 **Status bar** | A seeded edict has agents call the `report_status` MCP tool whenever they finish something; the newest one-two sentence summary ("We were working on org/repo#42: …", with a button per PR) sits in a bar at the bottom of that agent's own pane in the GUI grid. |
 | 🧠 **Campaign memory** | Per-step playbooks and failure-signature records carried into subsequent sessions. |
 | 🔌 **MCP interface** | `pr_state`, `pending_tasks`, `failure_pattern` and claim tools for agents — one call instead of three round-trips through the GitHub API. |
 | 🛰 **Fleet** | Run sessions on whichever of your machines has room, attach to any of them from anywhere, share loopback services between hosts. [Details below.](#fleet-many-machines-one-control-plane) |

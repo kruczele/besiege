@@ -445,9 +445,9 @@ const TOOLS = [
     name: "report_status",
     description:
       "Leave a one-to-two sentence summary of where things stand — call it each time you finish a piece " +
-      "of work or stop to wait on a human. It appears in the bar at the bottom of this session's pane in the Besiege GUI; when " +
-      "you pass repo and prNumber it renders as \"We were working on <repo>#<n>\" with a clickable link " +
-      "to the PR. Write it for someone who hasn't been following your session.",
+      "of work or stop to wait on a human. It appears in the bar at the bottom of this session's pane in the Besiege GUI; " +
+      "PRs you pass in prUrls render as buttons next to the summary. Write it for someone who hasn't been following " +
+      "your session, and keep URLs out of the summary text.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -455,8 +455,11 @@ const TOOLS = [
           type: "string",
           description: 'One-two sentences: the current state of the work, e.g. "Added retry to the sender; CI is green, awaiting review."',
         },
-        repo: { type: "string", description: 'GitHub full name of the PR\'s repo, e.g. "org/repo". Omit if no PR is involved.' },
-        prNumber: { type: "number", description: "The PR number on GitHub. Requires repo." },
+        prUrls: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Full GitHub PR URLs this update is about, e.g. ["https://github.com/org/repo/pull/42"]. Omit if no PR is involved.',
+        },
       },
       required: ["summary"],
     },
@@ -658,9 +661,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
 
       case "report_status": {
-        const { summary, repo, prNumber } = (args ?? {}) as { summary?: string; repo?: string; prNumber?: number };
+        const { summary, prUrls } = (args ?? {}) as { summary?: string; prUrls?: string[] };
         if (!summary) throw new Error("summary is required");
-        await postJson("/status-updates", { sessionId: SESSION_ID, cwd: process.cwd(), summary, repo, prNumber });
+        await postJson("/status-updates", { sessionId: SESSION_ID, cwd: process.cwd(), summary, prUrls });
         return { content: [{ type: "text", text: "Status recorded." }] };
       }
 

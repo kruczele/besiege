@@ -762,11 +762,31 @@ export const migrations: Migration[] = [
       ).run(STATUS_REPORT_RULE, new Date().toISOString());
     },
   },
+  {
+    name: "0042_status_update_pr_links",
+    sql: `
+      -- JSON array of {repo, number}: every PR the update is about. Older rows
+      -- keep their single repo/pr_number pair, folded into the array on read.
+      ALTER TABLE status_updates ADD COLUMN pr_links TEXT;
+    `,
+    after: (db) => {
+      // Only rewrite the seeded edict if the user hasn't edited it.
+      db.prepare("UPDATE config_rules SET context = ? WHERE context = ?").run(
+        STATUS_REPORT_RULE,
+        STATUS_REPORT_RULE_V1,
+      );
+    },
+  },
 ];
 
 // Seeded as a besiege_only '*' rule, like the orientation rule below — plain
 // data in the Edicts tab, editable or deletable by the user.
-const STATUS_REPORT_RULE = `Each time you finish a piece of work (or stop to wait on a human), call the besiege MCP tool report_status with a one-to-two sentence summary of where things stand — what you were working on and its current state, e.g. "Added retry to the webhook sender; CI is green and it's waiting on review." Pass repo (org/name) and prNumber whenever the work is tied to a pull request, so the GUI can link straight to it. Keep it short and concrete; this is what the operator reads at a glance in the bar at the bottom of the Besiege window, so write it for someone who hasn't been following your session.
+const STATUS_REPORT_RULE = `Each time you finish a piece of work (or stop to wait on a human), call the besiege MCP tool report_status with a one-to-two sentence summary of where things stand — what you were working on and its current state, e.g. "Added retry to the webhook sender; CI is green and it's waiting on review." Pass prUrls (an array of full GitHub PR URLs) whenever the work is tied to pull requests, so the GUI can render a button for each; keep the summary itself free of URLs. Keep it short and concrete; this is what the operator reads at a glance in the bar at the bottom of the Besiege window, so write it for someone who hasn't been following your session.
+
+This rule was seeded by Besiege and applies in every Besiege session. Edit or delete it from the Edicts tab if it stops being accurate.`;
+
+// Text seeded by 0041, kept so 0042 can tell whether the user edited it.
+const STATUS_REPORT_RULE_V1 = `Each time you finish a piece of work (or stop to wait on a human), call the besiege MCP tool report_status with a one-to-two sentence summary of where things stand — what you were working on and its current state, e.g. "Added retry to the webhook sender; CI is green and it's waiting on review." Pass repo (org/name) and prNumber whenever the work is tied to a pull request, so the GUI can link straight to it. Keep it short and concrete; this is what the operator reads at a glance in the bar at the bottom of the Besiege window, so write it for someone who hasn't been following your session.
 
 This rule was seeded by Besiege and applies in every Besiege session. Edit or delete it from the Edicts tab if it stops being accurate.`;
 

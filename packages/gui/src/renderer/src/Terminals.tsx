@@ -261,24 +261,22 @@ function relativeTime(iso: string): string {
 function StatusLine({ update }: { update: StatusUpdate }) {
   return (
     <span className="status-line">
-      {update.repo && update.prNumber && update.prUrl ? (
-        <>
-          We were working on{" "}
-          <a
-            href={update.prUrl}
-            onClick={(e) => {
-              e.preventDefault();
-              void window.api.openExternal(update.prUrl!);
-            }}
-          >
-            {update.repo}#{update.prNumber}
-          </a>
-          :{" "}
-        </>
-      ) : update.repo ? (
-        <>We were working on {update.repo}: </>
-      ) : null}
-      {update.summary}
+      <span className="status-line-text">{update.summary}</span>
+      {update.prs.map((pr) => (
+        <a
+          key={pr.url}
+          className="status-pr-button"
+          href={pr.url}
+          title={pr.url}
+          onClick={(e) => {
+            e.preventDefault();
+            void window.api.openExternal(pr.url);
+          }}
+        >
+          {pr.repo.split("/").pop()}
+          <span className="pane-pinned-pr-number">#{pr.number}</span>
+        </a>
+      ))}
     </span>
   );
 }

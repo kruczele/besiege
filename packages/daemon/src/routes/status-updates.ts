@@ -7,8 +7,26 @@ interface StatusUpdateRow {
   cwd: string | null;
   repo: string | null;
   pr_number: number | null;
+  pr_links: string | null;
   summary: string;
   created_at: string;
+}
+
+interface PrLink {
+  repo: string;
+  number: number;
+}
+
+const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:[/?#].*)?$/;
+
+function parsePrUrl(url: unknown): PrLink | null {
+  const m = typeof url === "string" ? PR_URL_RE.exec(url.trim()) : null;
+  return m ? { repo: m[1], number: Number(m[2]) } : null;
+}
+
+function prLinksOf(row: StatusUpdateRow): PrLink[] {
+  if (row.pr_links) return JSON.parse(row.pr_links) as PrLink[];
+  return row.repo && row.pr_number ? [{ repo: row.repo, number: row.pr_number }] : [];
 }
 
 function toStatusUpdate(row: StatusUpdateRow) {
@@ -17,14 +35,11 @@ function toStatusUpdate(row: StatusUpdateRow) {
     sessionId: row.session_id,
     cwd: row.cwd,
     repo: row.repo,
-    prNumber: row.pr_number,
-    prUrl: row.repo && row.pr_number ? `https://github.com/${row.repo}/pull/${row.pr_number}` : null,
+    prs: prLinksOf(row).map((pr) => ({ ...pr, url: `https://github.com/${pr.repo}/pull/${pr.number}` })),
     summary: row.summary,
     createdAt: row.created_at,
   };
 }
-
-const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 
 export function registerStatusUpdateRoutes(app: FastifyInstance, db: Database.Database) {
   app.get<{ Querystring: { limit?: string } }>("/status-updates", async (req) => {
@@ -36,34 +51,30 @@ export function registerStatusUpdateRoutes(app: FastifyInstance, db: Database.Da
   });
 
   app.post<{
-    Body: { sessionId?: string; cwd?: string; repo?: string; prNumber?: number; summary?: string };
+    Body: { sessionId?: string; cwd?: string; prUrls?: string[]; summary?: string };
   }>("/status-updates", async (req, reply) => {
-    const { sessionId, cwd, repo, prNumber, summary } = req.body ?? {};
+    const { sessionId, cwd, prUrls, summary } = req.body ?? {};
     if (!sessionId?.trim() || !summary?.trim()) {
       reply.code(400);
       return { error: "sessionId and summary are both required" };
     }
-    if (repo !== undefined && !REPO_RE.test(repo)) {
-      reply.code(400);
-      return { error: 'repo must look like "org/name"' };
-    }
-    if (prNumber !== undefined && (!Number.isInteger(prNumber) || prNumber <= 0)) {
-      reply.code(400);
-      return { error: "prNumber must be a positive integer" };
-    }
-    if (prNumber !== undefined && !repo) {
-      reply.code(400);
-      return { error: "prNumber requires repo" };
+    const prs: PrLink[] = [];
+    for (const url of prUrls ?? []) {
+      const pr = parsePrUrl(url);
+      if (!pr) {
+        reply.code(400);
+        return { error: `prUrls entries must be GitHub PR URLs like https://github.com/org/name/pull/1, got ${JSON.stringify(url)}` };
+      }
+      if (!prs.some((p) => p.repo === pr.repo && p.number === pr.number)) prs.push(pr);
     }
     const info = db
       .prepare(
-        "INSERT INTO status_updates (session_id, cwd, repo, pr_number, summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO status_updates (session_id, cwd, pr_links, summary, created_at) VALUES (?, ?, ?, ?, ?)",
       )
       .run(
         sessionId.trim(),
         cwd?.trim() ?? null,
-        repo ?? null,
-        prNumber ?? null,
+        prs.length > 0 ? JSON.stringify(prs) : null,
         summary.trim(),
         new Date().toISOString(),
       );
