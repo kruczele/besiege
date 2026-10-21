@@ -22,7 +22,7 @@ import type {
   TerminalSession,
 } from "../../shared/types.js";
 
-async function callDaemon<T>(method: "GET" | "POST" | "DELETE" | "PATCH", path: string, body?: unknown): Promise<T> {
+async function callDaemon<T>(method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },

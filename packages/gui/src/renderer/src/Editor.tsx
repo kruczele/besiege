@@ -3,6 +3,7 @@ import * as monaco from "monaco-editor/editor/editor.api";
 import "monaco-editor/basic-languages/monaco.contribution";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import type { PaneEditor } from "../../shared/types.js";
+import FileBrowser from "./FileBrowser.js";
 
 // Only the core editor worker is bundled: syntax highlighting comes from the
 // basic-languages tokenizers, while the TS/JSON/CSS language-service workers
@@ -18,7 +19,7 @@ monaco.editor.defineTheme("besiege", {
 
 type Status = { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
 
-export default function EditorView({ editor }: { editor: PaneEditor }) {
+export default function EditorView({ editor, onOpenFile }: { editor: PaneEditor; onOpenFile: (path: string) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const mtimeRef = useRef<number | undefined>(undefined);
@@ -86,28 +87,44 @@ export default function EditorView({ editor }: { editor: PaneEditor }) {
     };
   }, [editor.host, editor.path]);
 
+  const openFile = (path: string) => {
+    if (path === editor.path) return;
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    onOpenFile(path);
+  };
+
   return (
     <div className="pane-editor">
-      <div className="pane-editor-bar">
-        <span className="pane-editor-path" title={editor.path}>
-          {dirty && "● "}
-          {editor.host ? `${editor.host}:` : ""}
-          {editor.path}
-        </span>
-        {note && (
-          <span className="pane-editor-note" title={note}>
-            {note}
-          </span>
-        )}
-        {note?.includes("changed on disk") && (
-          <button onClick={() => void save(true)}>Overwrite</button>
-        )}
-        <button disabled={!dirty} onClick={() => void save()}>
-          Save
-        </button>
+      <div className="pane-editor-tree">
+        <FileBrowser
+          host={editor.host}
+          startDir={editor.path.replace(/\/[^/]*$/, "") || "/"}
+          activePath={editor.path}
+          onOpen={openFile}
+        />
       </div>
-      {status.kind === "error" && <p className="status status-down">{status.message}</p>}
-      <div className="pane-editor-monaco" ref={containerRef} hidden={status.kind === "error"} />
+      <div className="pane-editor-main">
+        <div className="pane-editor-bar">
+          <span className="pane-editor-path" title={editor.path}>
+            {dirty && "● "}
+            {editor.host ? `${editor.host}:` : ""}
+            {editor.path}
+          </span>
+          {note && (
+            <span className="pane-editor-note" title={note}>
+              {note}
+            </span>
+          )}
+          {note?.includes("changed on disk") && (
+            <button onClick={() => void save(true)}>Overwrite</button>
+          )}
+          <button disabled={!dirty} onClick={() => void save()}>
+            Save
+          </button>
+        </div>
+        {status.kind === "error" && <p className="status status-down">{status.message}</p>}
+        <div className="pane-editor-monaco" ref={containerRef} hidden={status.kind === "error"} />
+      </div>
     </div>
   );
 }
