@@ -39,9 +39,7 @@ export interface StatusUpdate {
   id: number;
   sessionId: string;
   cwd: string | null;
-  repo: string | null;
-  prNumber: number | null;
-  prUrl: string | null;
+  prs: { repo: string; number: number; url: string }[];
   summary: string;
   createdAt: string;
 }

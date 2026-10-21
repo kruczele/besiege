@@ -1720,9 +1720,35 @@ a.pane-pinned-pr-chip:hover {
 .status-bar-row .status-line {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.status-bar-row .status-line-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-pr-button {
+  flex-shrink: 0;
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.72rem;
+  margin-left: 0.4rem;
+}
+
+.status-bar-row .status-pr-button {
+  margin-left: 0;
+}
+
+.status-bar a.status-pr-button:hover {
+  border-color: var(--accent);
+  text-decoration: none;
 }
 
 .status-bar a {
