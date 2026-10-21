@@ -12,6 +12,7 @@ import type {
   PaneEditor,
   PaneNode,
   PaneNote,
+  StatusUpdate,
   TerminalLayout,
   TerminalSession,
 } from "../../shared/types.js";
@@ -254,10 +255,68 @@ function relativeTime(iso: string): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// Agent-written "where things stand" summaries (report_status MCP tool, fed
+// by the global edict). Scoped to the pane's own agent: the newest sits in a
+// bar at the bottom of the pane, a few more behind the toggle.
+function StatusLine({ update }: { update: StatusUpdate }) {
+  return (
+    <span className="status-line">
+      {update.repo && update.prNumber && update.prUrl ? (
+        <>
+          We were working on{" "}
+          <a
+            href={update.prUrl}
+            onClick={(e) => {
+              e.preventDefault();
+              void window.api.openExternal(update.prUrl!);
+            }}
+          >
+            {update.repo}#{update.prNumber}
+          </a>
+          :{" "}
+        </>
+      ) : update.repo ? (
+        <>We were working on {update.repo}: </>
+      ) : null}
+      {update.summary}
+    </span>
+  );
+}
+
+function PaneStatusBar({ updates }: { updates: StatusUpdate[] }) {
+  const [open, setOpen] = useState(false);
+  if (updates.length === 0) return null;
+  const [latest, ...older] = updates;
+
+  return (
+    <div className="status-bar">
+      {open && older.length > 0 && (
+        <ul className="status-bar-history">
+          {older.map((u) => (
+            <li key={u.id}>
+              <StatusLine update={u} /> <span className="status-bar-age">{relativeTime(u.createdAt)} ago</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="status-bar-row">
+        <StatusLine update={latest} />
+        <span className="status-bar-age">{relativeTime(latest.createdAt)} ago</span>
+        {older.length > 0 && (
+          <button className="status-bar-toggle" onClick={() => setOpen((o) => !o)}>
+            {open ? "Hide earlier" : "Earlier"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Above this many claimed PRs, an agent is doing bulk campaign work — a
 // footer full of individual chips stops being a quick-glance aid and starts
 // being clutter, so it collapses to a count instead.
 const PINNED_PR_CHIP_LIMIT = 3;
+const STATUS_HISTORY_PER_PANE = 10;
 
 // The PR(s) a pane's agent currently has claimed (claim_pr), pinned to the
 // bottom of its own pane for one-click access — register_pr alone carries no
@@ -362,6 +421,7 @@ function PaneView({
   hosts,
   defaultDir,
   claimsBySessionId,
+  statusBySessionId,
   activePaneId,
   dnd,
   onTitle,
@@ -385,6 +445,8 @@ function PaneView({
   // can look up its own agent's claims regardless of which terminal row
   // currently backs it (e.g. after a resume).
   claimsBySessionId: Record<string, ActiveClaim[]>;
+  // Newest-first report_status updates, keyed the same way.
+  statusBySessionId: Record<string, StatusUpdate[]>;
   activePaneId: string | null;
   dnd: PaneDnd | null;
   onTitle: (id: number, title: string) => void;
@@ -413,6 +475,7 @@ function PaneView({
         hosts={hosts}
         defaultDir={defaultDir}
         claimsBySessionId={claimsBySessionId}
+        statusBySessionId={statusBySessionId}
         activePaneId={activePaneId}
         dnd={dnd}
         onTitle={onTitle}
@@ -433,6 +496,7 @@ function PaneView({
   const isExited = session?.status === "exited";
   const adapter = session?.agentAdapterName != null ? adapters.find((a) => a.name === session.agentAdapterName) : undefined;
   const canResume = isExited && adapter?.resumeFlag != null && session?.agentSessionId != null;
+  const paneStatus = session?.agentSessionId != null ? statusBySessionId[session.agentSessionId] ?? [] : [];
   const pinnedClaims = session?.agentSessionId != null ? claimsBySessionId[session.agentSessionId] ?? [] : [];
 
   return (
@@ -511,6 +575,7 @@ function PaneView({
         <>
           <TerminalView id={session.id} onTitle={(title) => onTitle(session.id, title)} />
           <PinnedPrBar claims={pinnedClaims} />
+          <PaneStatusBar updates={paneStatus} />
         </>
       )}
     </div>
@@ -600,6 +665,7 @@ export function TerminalsMain({
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [claims, setClaims] = useState<ActiveClaim[]>([]);
+  const [statusUpdates, setStatusUpdates] = useState<StatusUpdate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [adapters, setAdapters] = useState<AgentAdapter[]>([]);
   const [hosts, setHosts] = useState<string[]>([]);
@@ -702,13 +768,15 @@ export function TerminalsMain({
     let cancelled = false;
 
     const poll = async () => {
-      const [sessionsRes, claimsRes] = await Promise.all([
+      const [sessionsRes, claimsRes, statusRes] = await Promise.all([
         window.api.listTerminals(campaignId),
         window.api.listCampaignClaims(campaignId),
+        window.api.listStatusUpdates(200),
       ]);
       if (cancelled) return;
       if (sessionsRes.ok) setSessions(sessionsRes.result);
       if (claimsRes.ok) setClaims(claimsRes.result);
+      if (statusRes.ok) setStatusUpdates(statusRes.result);
     };
 
     poll();
@@ -729,6 +797,15 @@ export function TerminalsMain({
     }
     return map;
   }, [claims]);
+
+  const statusBySessionId = useMemo(() => {
+    const map: Record<string, StatusUpdate[]> = {};
+    for (const u of statusUpdates) {
+      const list = (map[u.sessionId] ??= []);
+      if (list.length < STATUS_HISTORY_PER_PANE) list.push(u);
+    }
+    return map;
+  }, [statusUpdates]);
 
   const activeLayout = layouts.find((l) => l.id === activeLayoutId) ?? null;
 
@@ -1027,6 +1104,7 @@ export function TerminalsMain({
             hosts={hosts}
             defaultDir={campaign?.defaultDir ?? null}
             claimsBySessionId={claimsBySessionId}
+            statusBySessionId={statusBySessionId}
             activePaneId={activePaneId}
             dnd={
               editingLayout
