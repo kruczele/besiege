@@ -262,7 +262,7 @@ function StatusLine({ update }: { update: StatusUpdate }) {
   return (
     <span className="status-line">
       <span className="status-line-text">{update.summary}</span>
-      {update.prs.map((pr) => (
+      {(update.prs ?? []).map((pr) => (
         <a
           key={pr.url}
           className="status-pr-button"
