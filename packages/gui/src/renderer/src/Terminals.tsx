@@ -54,97 +54,188 @@ function matchShortcut(e: KeyboardEvent): ShortcutAction | null {
   return null;
 }
 
+// xterm instances outlive their pane: switching campaigns (or tabs) unmounts
+// every TerminalView, and rebuilding means a fresh Terminal plus a replay of
+// the daemon's ~200KB ring buffer per pane. Parked instances stay subscribed
+// to their stream, so reattaching is just moving a DOM node back in.
+interface CachedTerminal {
+  term: Terminal;
+  fit: FitAddon;
+  host: HTMLDivElement;
+  webgl: WebglAddon | null;
+  onTitle: (title: string) => void;
+  teardown: () => void;
+}
+
+const terminalCache = new Map<number, CachedTerminal>();
+// Parked instances only cost memory and a stream subscription, but sessions
+// that are never shown again (other machine closed them, campaign deleted)
+// would otherwise pile up — evict least recently parked past this cap.
+const MAX_PARKED_TERMINALS = 24;
+const parkedOrder: number[] = [];
+
+function createCachedTerminal(id: number): CachedTerminal {
+  const host = document.createElement("div");
+  host.className = "terminal-host";
+
+  const term = new Terminal({
+    convertEol: true,
+    fontSize: 13,
+    // The default (courier) lacks block-element glyphs like ▀ ▄ (agy's logo),
+    // so they fall back to a font with a different advance and misalign.
+    fontFamily: 'Menlo, "SF Mono", Monaco, Consolas, "DejaVu Sans Mono", monospace',
+    theme: { background: "#1b1e27", foreground: "#e7e8ed" },
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  // Default handler opens via window.open, which Electron's
+  // setWindowOpenHandler (main/index.ts) already routes to shell.openExternal.
+  term.loadAddon(new WebLinksAddon());
+  term.open(host);
+
+  // Reserved pane-split/navigation combos must never reach the shell —
+  // returning false here stops xterm from handling (and writing) them,
+  // and the keydown event still bubbles to the window-level listener.
+  // Ctrl+Shift+C is handled the same way, as an explicit copy shortcut
+  // alongside the copy-on-select below (xterm has no clipboard integration
+  // of its own — selecting text here otherwise does nothing).
+  term.attachCustomKeyEventHandler((e) => {
+    if (matchShortcut(e) !== null) return false;
+    if (e.type === "keydown" && e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
+      const selection = term.getSelection();
+      if (selection) void navigator.clipboard.writeText(selection).catch(() => {});
+      return false;
+    }
+    return true;
+  });
+  // Copy-on-select, like most terminal emulators — no explicit action
+  // needed, selecting text is enough.
+  const selectionSub = term.onSelectionChange(() => {
+    const selection = term.getSelection();
+    if (selection) void navigator.clipboard.writeText(selection).catch(() => {});
+  });
+
+  let disposed = false;
+  const dataSub = term.onData((data) => {
+    window.api.writeTerminal(id, data);
+  });
+
+  const entry: CachedTerminal = { term, fit, host, webgl: null, onTitle: () => {}, teardown: () => {} };
+
+  // Tabs rename themselves the way real terminal tabs do: shells and CLIs
+  // (Claude Code included) set this via an OSC 0/2 title escape sequence.
+  const titleSub = term.onTitleChange((title) => {
+    if (title) entry.onTitle(title);
+  });
+
+  const unsubscribe = window.api.attachTerminal(
+    id,
+    (chunk) => {
+      if (!disposed) term.write(chunk);
+    },
+    (exitCode) => {
+      if (!disposed) {
+        term.write(`\r\n\x1b[90m[process exited${exitCode !== null ? ` with code ${exitCode}` : ""}]\x1b[0m\r\n`);
+      }
+    },
+  );
+  window.api.openTerminalStream(id);
+
+  entry.teardown = () => {
+    disposed = true;
+    releaseWebgl(entry);
+    dataSub.dispose();
+    titleSub.dispose();
+    selectionSub.dispose();
+    unsubscribe();
+    window.api.closeTerminalStream(id);
+    term.dispose();
+  };
+  return entry;
+}
+
+// The WebGL renderer draws block/box characters itself instead of via font
+// glyphs. Only held while the terminal is on screen: Chromium caps live
+// WebGL contexts per page (~16) and force-loses the oldest past that, and
+// xterm's addon never calls loseContext on dispose, so contexts from
+// unmounted panes would otherwise linger until GC and crowd out live ones.
+function acquireWebgl(entry: CachedTerminal) {
+  if (entry.webgl) return;
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => releaseWebgl(entry));
+    entry.term.loadAddon(webgl);
+    entry.webgl = webgl;
+  } catch {}
+}
+
+function releaseWebgl(entry: CachedTerminal) {
+  const webgl = entry.webgl;
+  if (!webgl) return;
+  entry.webgl = null;
+  const canvases = [...entry.host.querySelectorAll("canvas")];
+  webgl.dispose();
+  for (const canvas of canvases) {
+    canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
+function parkTerminal(id: number, entry: CachedTerminal) {
+  releaseWebgl(entry);
+  entry.host.remove();
+  parkedOrder.push(id);
+  while (parkedOrder.length > MAX_PARKED_TERMINALS) {
+    const evict = parkedOrder.shift()!;
+    terminalCache.get(evict)?.teardown();
+    terminalCache.delete(evict);
+  }
+}
+
+function unpark(id: number) {
+  const i = parkedOrder.indexOf(id);
+  if (i !== -1) parkedOrder.splice(i, 1);
+}
+
+// For sessions that are gone for good (pane closed): drops the cached
+// instance and its stream instead of waiting for LRU eviction.
+function disposeCachedTerminal(id: number) {
+  unpark(id);
+  terminalCache.get(id)?.teardown();
+  terminalCache.delete(id);
+}
+
 function TerminalView({ id, onTitle }: { id: number; onTitle: (title: string) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onTitleRef = useRef(onTitle);
+  onTitleRef.current = onTitle;
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const term = new Terminal({
-      convertEol: true,
-      fontSize: 13,
-      // The default (courier) lacks block-element glyphs like ▀ ▄ (agy's logo),
-      // so they fall back to a font with a different advance and misalign.
-      fontFamily: 'Menlo, "SF Mono", Monaco, Consolas, "DejaVu Sans Mono", monospace',
-      theme: { background: "#1b1e27", foreground: "#e7e8ed" },
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    // Default handler opens via window.open, which Electron's
-    // setWindowOpenHandler (main/index.ts) already routes to shell.openExternal.
-    term.loadAddon(new WebLinksAddon());
-    term.open(container);
-    // The WebGL renderer draws block/box characters itself instead of via
-    // font glyphs. Optional: on failure or GPU context loss xterm falls back
-    // to its DOM renderer.
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {}
-    fit.fit();
+    let entry = terminalCache.get(id);
+    if (!entry) {
+      entry = createCachedTerminal(id);
+      terminalCache.set(id, entry);
+    }
+    unpark(id);
+    const mounted = entry;
+    mounted.onTitle = (title) => onTitleRef.current(title);
+    container.appendChild(mounted.host);
+    acquireWebgl(mounted);
 
-    // Reserved pane-split/navigation combos must never reach the shell —
-    // returning false here stops xterm from handling (and writing) them,
-    // and the keydown event still bubbles to the window-level listener.
-    // Ctrl+Shift+C is handled the same way, as an explicit copy shortcut
-    // alongside the copy-on-select below (xterm has no clipboard integration
-    // of its own — selecting text here otherwise does nothing).
-    term.attachCustomKeyEventHandler((e) => {
-      if (matchShortcut(e) !== null) return false;
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
-        const selection = term.getSelection();
-        if (selection) void navigator.clipboard.writeText(selection).catch(() => {});
-        return false;
-      }
-      return true;
-    });
-    // Copy-on-select, like most terminal emulators — no explicit action
-    // needed, selecting text is enough.
-    const selectionSub = term.onSelectionChange(() => {
-      const selection = term.getSelection();
-      if (selection) void navigator.clipboard.writeText(selection).catch(() => {});
-    });
-
-    let disposed = false;
-    const dataSub = term.onData((data) => {
-      window.api.writeTerminal(id, data);
-    });
-    // Tabs rename themselves the way real terminal tabs do: shells and CLIs
-    // (Claude Code included) set this via an OSC 0/2 title escape sequence.
-    const titleSub = term.onTitleChange((title) => {
-      if (title) onTitle(title);
-    });
-
-    const unsubscribe = window.api.attachTerminal(
-      id,
-      (chunk) => {
-        if (!disposed) term.write(chunk);
-      },
-      (exitCode) => {
-        if (!disposed) {
-          term.write(`\r\n\x1b[90m[process exited${exitCode !== null ? ` with code ${exitCode}` : ""}]\x1b[0m\r\n`);
-        }
-      },
-    );
-    window.api.openTerminalStream(id);
-
+    // Also fires once on observe, covering the initial fit and any size
+    // change that happened while parked.
     const resizeObserver = new ResizeObserver(() => {
-      fit.fit();
-      window.api.resizeTerminal(id, term.cols, term.rows);
+      mounted.fit.fit();
+      window.api.resizeTerminal(id, mounted.term.cols, mounted.term.rows);
     });
     resizeObserver.observe(container);
 
     return () => {
-      disposed = true;
       resizeObserver.disconnect();
-      dataSub.dispose();
-      titleSub.dispose();
-      selectionSub.dispose();
-      unsubscribe();
-      window.api.closeTerminalStream(id);
-      term.dispose();
+      // A pane closed via handleClosePane has already been torn down.
+      if (terminalCache.get(id) === mounted) parkTerminal(id, mounted);
     };
   }, [id]);
 
@@ -828,7 +919,10 @@ export function TerminalsMain({
 
   const handleClosePane = async (paneId: string, sessionId?: number) => {
     if (!activeLayout || campaignId === null) return;
-    if (sessionId !== undefined) await window.api.deleteTerminal(sessionId);
+    if (sessionId !== undefined) {
+      disposeCachedTerminal(sessionId);
+      await window.api.deleteTerminal(sessionId);
+    }
     const collapsed = closePane(activeLayout.tree, paneId);
     persistTree(activeLayout.id, collapsed ?? emptyTree());
     if (activePaneId === paneId) setActivePaneId(null);
