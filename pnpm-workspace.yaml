@@ -8,3 +8,6 @@ allowBuilds:
 # a window for a malicious/compromised release to get flagged and pulled
 # before it can land here. In minutes, since that's the unit pnpm expects.
 minimumReleaseAge: 10080
+# monaco-editor pins a dompurify with known vulnerabilities; drop once upstream bumps past it.
+overrides:
+  dompurify: "3.4.17"
